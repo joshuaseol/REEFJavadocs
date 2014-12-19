@@ -1,0 +1,520 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>/**<a name="line.1"></a>
+<span class="sourceLineNo">002</span> * Licensed to the Apache Software Foundation (ASF) under one<a name="line.2"></a>
+<span class="sourceLineNo">003</span> * or more contributor license agreements.  See the NOTICE file<a name="line.3"></a>
+<span class="sourceLineNo">004</span> * distributed with this work for additional information<a name="line.4"></a>
+<span class="sourceLineNo">005</span> * regarding copyright ownership.  The ASF licenses this file<a name="line.5"></a>
+<span class="sourceLineNo">006</span> * to you under the Apache License, Version 2.0 (the<a name="line.6"></a>
+<span class="sourceLineNo">007</span> * "License"); you may not use this file except in compliance<a name="line.7"></a>
+<span class="sourceLineNo">008</span> * with the License.  You may obtain a copy of the License at<a name="line.8"></a>
+<span class="sourceLineNo">009</span> *<a name="line.9"></a>
+<span class="sourceLineNo">010</span> *   http://www.apache.org/licenses/LICENSE-2.0<a name="line.10"></a>
+<span class="sourceLineNo">011</span> *<a name="line.11"></a>
+<span class="sourceLineNo">012</span> * Unless required by applicable law or agreed to in writing,<a name="line.12"></a>
+<span class="sourceLineNo">013</span> * software distributed under the License is distributed on an<a name="line.13"></a>
+<span class="sourceLineNo">014</span> * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY<a name="line.14"></a>
+<span class="sourceLineNo">015</span> * KIND, either express or implied.  See the License for the<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * specific language governing permissions and limitations<a name="line.16"></a>
+<span class="sourceLineNo">017</span> * under the License.<a name="line.17"></a>
+<span class="sourceLineNo">018</span> */<a name="line.18"></a>
+<span class="sourceLineNo">019</span>package org.apache.reef.tang.implementation.java;<a name="line.19"></a>
+<span class="sourceLineNo">020</span><a name="line.20"></a>
+<span class="sourceLineNo">021</span>import org.apache.reef.tang.ClassHierarchy;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import org.apache.reef.tang.ExternalConstructor;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import org.apache.reef.tang.JavaClassHierarchy;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>import org.apache.reef.tang.annotations.Name;<a name="line.24"></a>
+<span class="sourceLineNo">025</span>import org.apache.reef.tang.annotations.NamedParameter;<a name="line.25"></a>
+<span class="sourceLineNo">026</span>import org.apache.reef.tang.exceptions.BindException;<a name="line.26"></a>
+<span class="sourceLineNo">027</span>import org.apache.reef.tang.exceptions.ClassHierarchyException;<a name="line.27"></a>
+<span class="sourceLineNo">028</span>import org.apache.reef.tang.exceptions.NameResolutionException;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>import org.apache.reef.tang.exceptions.ParseException;<a name="line.29"></a>
+<span class="sourceLineNo">030</span>import org.apache.reef.tang.formats.ParameterParser;<a name="line.30"></a>
+<span class="sourceLineNo">031</span>import org.apache.reef.tang.types.*;<a name="line.31"></a>
+<span class="sourceLineNo">032</span>import org.apache.reef.tang.util.MonotonicTreeMap;<a name="line.32"></a>
+<span class="sourceLineNo">033</span>import org.apache.reef.tang.util.ReflectionUtilities;<a name="line.33"></a>
+<span class="sourceLineNo">034</span><a name="line.34"></a>
+<span class="sourceLineNo">035</span>import java.lang.reflect.Type;<a name="line.35"></a>
+<span class="sourceLineNo">036</span>import java.net.URL;<a name="line.36"></a>
+<span class="sourceLineNo">037</span>import java.net.URLClassLoader;<a name="line.37"></a>
+<span class="sourceLineNo">038</span>import java.util.*;<a name="line.38"></a>
+<span class="sourceLineNo">039</span><a name="line.39"></a>
+<span class="sourceLineNo">040</span>public class ClassHierarchyImpl implements JavaClassHierarchy {<a name="line.40"></a>
+<span class="sourceLineNo">041</span>  // TODO Want to add a "register namespace" method, but Java is not designed<a name="line.41"></a>
+<span class="sourceLineNo">042</span>  // to support such things.<a name="line.42"></a>
+<span class="sourceLineNo">043</span>  // There are third party libraries that would help, but they can fail if the<a name="line.43"></a>
+<span class="sourceLineNo">044</span>  // relevant jar has not yet been loaded.  Tint works around this using such<a name="line.44"></a>
+<span class="sourceLineNo">045</span>  // a library.<a name="line.45"></a>
+<span class="sourceLineNo">046</span><a name="line.46"></a>
+<span class="sourceLineNo">047</span>  /**<a name="line.47"></a>
+<span class="sourceLineNo">048</span>   * The ParameterParser that this ClassHierarchy uses to parse default values.<a name="line.48"></a>
+<span class="sourceLineNo">049</span>   * Custom parameter parsers allow applications to extend the set of classes<a name="line.49"></a>
+<span class="sourceLineNo">050</span>   * that Tang can parse.<a name="line.50"></a>
+<span class="sourceLineNo">051</span>   */<a name="line.51"></a>
+<span class="sourceLineNo">052</span>  public final ParameterParser parameterParser = new ParameterParser();<a name="line.52"></a>
+<span class="sourceLineNo">053</span>  /**<a name="line.53"></a>
+<span class="sourceLineNo">054</span>   * The classloader that was used to populate this class hierarchy.<a name="line.54"></a>
+<span class="sourceLineNo">055</span>   */<a name="line.55"></a>
+<span class="sourceLineNo">056</span>  private final URLClassLoader loader;<a name="line.56"></a>
+<span class="sourceLineNo">057</span>  /**<a name="line.57"></a>
+<span class="sourceLineNo">058</span>   * The jars that are reflected by that loader.  These are in addition to<a name="line.58"></a>
+<span class="sourceLineNo">059</span>   * whatever jars are available by the default classloader (i.e., the one<a name="line.59"></a>
+<span class="sourceLineNo">060</span>   * that loaded Tang.  We need this list so that we can merge class hierarchies<a name="line.60"></a>
+<span class="sourceLineNo">061</span>   * that are backed by different classpaths.<a name="line.61"></a>
+<span class="sourceLineNo">062</span>   */<a name="line.62"></a>
+<span class="sourceLineNo">063</span>  private final List&lt;URL&gt; jars;<a name="line.63"></a>
+<span class="sourceLineNo">064</span>  /**<a name="line.64"></a>
+<span class="sourceLineNo">065</span>   * A reference to the root package which is a root of a tree of nodes.<a name="line.65"></a>
+<span class="sourceLineNo">066</span>   * The children of each node in the tree are accessible by name, and the<a name="line.66"></a>
+<span class="sourceLineNo">067</span>   * structure of the tree mirrors Java's package namespace.<a name="line.67"></a>
+<span class="sourceLineNo">068</span>   */<a name="line.68"></a>
+<span class="sourceLineNo">069</span>  private final PackageNode namespace;<a name="line.69"></a>
+<span class="sourceLineNo">070</span>  /**<a name="line.70"></a>
+<span class="sourceLineNo">071</span>   * A map from short name to named parameter node.  This is only used to<a name="line.71"></a>
+<span class="sourceLineNo">072</span>   * sanity check short names so that name clashes get resolved.<a name="line.72"></a>
+<span class="sourceLineNo">073</span>   */<a name="line.73"></a>
+<span class="sourceLineNo">074</span>  private final Map&lt;String, NamedParameterNode&lt;?&gt;&gt; shortNames = new MonotonicTreeMap&lt;&gt;();<a name="line.74"></a>
+<span class="sourceLineNo">075</span><a name="line.75"></a>
+<span class="sourceLineNo">076</span>  @SuppressWarnings("unchecked")<a name="line.76"></a>
+<span class="sourceLineNo">077</span>  public ClassHierarchyImpl() {<a name="line.77"></a>
+<span class="sourceLineNo">078</span>    this(new URL[0], new Class[0]);<a name="line.78"></a>
+<span class="sourceLineNo">079</span>  }<a name="line.79"></a>
+<span class="sourceLineNo">080</span><a name="line.80"></a>
+<span class="sourceLineNo">081</span>  @SuppressWarnings("unchecked")<a name="line.81"></a>
+<span class="sourceLineNo">082</span>  public ClassHierarchyImpl(URL... jars) {<a name="line.82"></a>
+<span class="sourceLineNo">083</span>    this(jars, new Class[0]);<a name="line.83"></a>
+<span class="sourceLineNo">084</span>  }<a name="line.84"></a>
+<span class="sourceLineNo">085</span><a name="line.85"></a>
+<span class="sourceLineNo">086</span>  public ClassHierarchyImpl(URL[] jars, Class&lt;? extends ExternalConstructor&lt;?&gt;&gt;[] parameterParsers) {<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    this.namespace = JavaNodeFactory.createRootPackageNode();<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    this.jars = new ArrayList&lt;&gt;(Arrays.asList(jars));<a name="line.88"></a>
+<span class="sourceLineNo">089</span>    this.loader = new URLClassLoader(jars, this.getClass().getClassLoader());<a name="line.89"></a>
+<span class="sourceLineNo">090</span>    for (Class&lt;? extends ExternalConstructor&lt;?&gt;&gt; p : parameterParsers) {<a name="line.90"></a>
+<span class="sourceLineNo">091</span>      try {<a name="line.91"></a>
+<span class="sourceLineNo">092</span>        parameterParser.addParser(p);<a name="line.92"></a>
+<span class="sourceLineNo">093</span>      } catch (BindException e) {<a name="line.93"></a>
+<span class="sourceLineNo">094</span>        throw new IllegalArgumentException("Could not register parameter parsers", e);<a name="line.94"></a>
+<span class="sourceLineNo">095</span>      }<a name="line.95"></a>
+<span class="sourceLineNo">096</span>    }<a name="line.96"></a>
+<span class="sourceLineNo">097</span>  }<a name="line.97"></a>
+<span class="sourceLineNo">098</span><a name="line.98"></a>
+<span class="sourceLineNo">099</span>  /**<a name="line.99"></a>
+<span class="sourceLineNo">100</span>   * A helper method that returns the parsed default value of a given<a name="line.100"></a>
+<span class="sourceLineNo">101</span>   * NamedParameter.<a name="line.101"></a>
+<span class="sourceLineNo">102</span>   *<a name="line.102"></a>
+<span class="sourceLineNo">103</span>   * @return null or an empty set if there is no default value, the default value (or set of values) otherwise.<a name="line.103"></a>
+<span class="sourceLineNo">104</span>   * @throws ClassHierarchyException if a default value was specified, but could not be parsed, or if a set of<a name="line.104"></a>
+<span class="sourceLineNo">105</span>   *                                 values were specified for a non-set parameter.<a name="line.105"></a>
+<span class="sourceLineNo">106</span>   */<a name="line.106"></a>
+<span class="sourceLineNo">107</span>  @SuppressWarnings("unchecked")<a name="line.107"></a>
+<span class="sourceLineNo">108</span>  @Override<a name="line.108"></a>
+<span class="sourceLineNo">109</span>  public &lt;T&gt; T parseDefaultValue(NamedParameterNode&lt;T&gt; name) {<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    String[] vals = name.getDefaultInstanceAsStrings();<a name="line.110"></a>
+<span class="sourceLineNo">111</span>    T[] ret = (T[]) new Object[vals.length];<a name="line.111"></a>
+<span class="sourceLineNo">112</span>    for (int i = 0; i &lt; vals.length; i++) {<a name="line.112"></a>
+<span class="sourceLineNo">113</span>      String val = vals[i];<a name="line.113"></a>
+<span class="sourceLineNo">114</span>      try {<a name="line.114"></a>
+<span class="sourceLineNo">115</span>        ret[i] = parse(name, val);<a name="line.115"></a>
+<span class="sourceLineNo">116</span>      } catch (ParseException e) {<a name="line.116"></a>
+<span class="sourceLineNo">117</span>        throw new ClassHierarchyException("Could not parse default value", e);<a name="line.117"></a>
+<span class="sourceLineNo">118</span>      }<a name="line.118"></a>
+<span class="sourceLineNo">119</span>    }<a name="line.119"></a>
+<span class="sourceLineNo">120</span>    if (name.isSet()) {<a name="line.120"></a>
+<span class="sourceLineNo">121</span>      return (T) new HashSet&lt;T&gt;(Arrays.asList(ret));<a name="line.121"></a>
+<span class="sourceLineNo">122</span>    } else if (name.isList()) {<a name="line.122"></a>
+<span class="sourceLineNo">123</span>      return (T) new ArrayList&lt;T&gt;(Arrays.asList(ret));<a name="line.123"></a>
+<span class="sourceLineNo">124</span>    } else {<a name="line.124"></a>
+<span class="sourceLineNo">125</span>      if (ret.length == 0) {<a name="line.125"></a>
+<span class="sourceLineNo">126</span>        return null;<a name="line.126"></a>
+<span class="sourceLineNo">127</span>      } else if (ret.length == 1) {<a name="line.127"></a>
+<span class="sourceLineNo">128</span>        return ret[0];<a name="line.128"></a>
+<span class="sourceLineNo">129</span>      } else {<a name="line.129"></a>
+<span class="sourceLineNo">130</span>        throw new IllegalStateException("Multiple defaults for non-set named parameter! " + name.getFullName());<a name="line.130"></a>
+<span class="sourceLineNo">131</span>      }<a name="line.131"></a>
+<span class="sourceLineNo">132</span>    }<a name="line.132"></a>
+<span class="sourceLineNo">133</span>  }<a name="line.133"></a>
+<span class="sourceLineNo">134</span><a name="line.134"></a>
+<span class="sourceLineNo">135</span>  /**<a name="line.135"></a>
+<span class="sourceLineNo">136</span>   * Parse a string, assuming that it is of the type expected by a given NamedParameter.<a name="line.136"></a>
+<span class="sourceLineNo">137</span>   * &lt;p/&gt;<a name="line.137"></a>
+<span class="sourceLineNo">138</span>   * This method does not deal with sets; if the NamedParameter is set valued, then the provided<a name="line.138"></a>
+<span class="sourceLineNo">139</span>   * string should correspond to a single member of the set.  It is up to the caller to call parse<a name="line.139"></a>
+<span class="sourceLineNo">140</span>   * once for each value that should be parsed as a member of the set.<a name="line.140"></a>
+<span class="sourceLineNo">141</span>   *<a name="line.141"></a>
+<span class="sourceLineNo">142</span>   * @return a non-null reference to the parsed value.<a name="line.142"></a>
+<span class="sourceLineNo">143</span>   */<a name="line.143"></a>
+<span class="sourceLineNo">144</span>  @Override<a name="line.144"></a>
+<span class="sourceLineNo">145</span>  @SuppressWarnings("unchecked")<a name="line.145"></a>
+<span class="sourceLineNo">146</span>  public &lt;T&gt; T parse(NamedParameterNode&lt;T&gt; np, String value) throws ParseException {<a name="line.146"></a>
+<span class="sourceLineNo">147</span>    final ClassNode&lt;T&gt; iface;<a name="line.147"></a>
+<span class="sourceLineNo">148</span>    try {<a name="line.148"></a>
+<span class="sourceLineNo">149</span>      iface = (ClassNode&lt;T&gt;) getNode(np.getFullArgName());<a name="line.149"></a>
+<span class="sourceLineNo">150</span>    } catch (NameResolutionException e) {<a name="line.150"></a>
+<span class="sourceLineNo">151</span>      throw new IllegalStateException("Could not parse validated named parameter argument type.  NamedParameter is " + np.getFullName() + " argument type is " + np.getFullArgName());<a name="line.151"></a>
+<span class="sourceLineNo">152</span>    }<a name="line.152"></a>
+<span class="sourceLineNo">153</span>    Class&lt;?&gt; clazz;<a name="line.153"></a>
+<span class="sourceLineNo">154</span>    String fullName;<a name="line.154"></a>
+<span class="sourceLineNo">155</span>    try {<a name="line.155"></a>
+<span class="sourceLineNo">156</span>      clazz = (Class&lt;?&gt;) classForName(iface.getFullName());<a name="line.156"></a>
+<span class="sourceLineNo">157</span>      fullName = null;<a name="line.157"></a>
+<span class="sourceLineNo">158</span>    } catch (ClassNotFoundException e) {<a name="line.158"></a>
+<span class="sourceLineNo">159</span>      clazz = null;<a name="line.159"></a>
+<span class="sourceLineNo">160</span>      fullName = iface.getFullName();<a name="line.160"></a>
+<span class="sourceLineNo">161</span>    }<a name="line.161"></a>
+<span class="sourceLineNo">162</span>    try {<a name="line.162"></a>
+<span class="sourceLineNo">163</span>      if (clazz != null) {<a name="line.163"></a>
+<span class="sourceLineNo">164</span>        return (T) parameterParser.parse(clazz, value);<a name="line.164"></a>
+<span class="sourceLineNo">165</span>      } else {<a name="line.165"></a>
+<span class="sourceLineNo">166</span>        return parameterParser.parse(fullName, value);<a name="line.166"></a>
+<span class="sourceLineNo">167</span>      }<a name="line.167"></a>
+<span class="sourceLineNo">168</span>    } catch (UnsupportedOperationException e) {<a name="line.168"></a>
+<span class="sourceLineNo">169</span>      try {<a name="line.169"></a>
+<span class="sourceLineNo">170</span>        final Node impl = getNode(value);<a name="line.170"></a>
+<span class="sourceLineNo">171</span>        if (impl instanceof ClassNode) {<a name="line.171"></a>
+<span class="sourceLineNo">172</span>          if (isImplementation(iface, (ClassNode&lt;?&gt;) impl)) {<a name="line.172"></a>
+<span class="sourceLineNo">173</span>            return (T) impl;<a name="line.173"></a>
+<span class="sourceLineNo">174</span>          }<a name="line.174"></a>
+<span class="sourceLineNo">175</span>        }<a name="line.175"></a>
+<span class="sourceLineNo">176</span>        throw new ParseException("Name&lt;" + iface.getFullName() + "&gt; " + np.getFullName() + " cannot take non-subclass " + impl.getFullName(), e);<a name="line.176"></a>
+<span class="sourceLineNo">177</span>      } catch (NameResolutionException e2) {<a name="line.177"></a>
+<span class="sourceLineNo">178</span>        throw new ParseException("Name&lt;" + iface.getFullName() + "&gt; " + np.getFullName() + " cannot take non-class " + value, e);<a name="line.178"></a>
+<span class="sourceLineNo">179</span>      }<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    }<a name="line.180"></a>
+<span class="sourceLineNo">181</span>  }<a name="line.181"></a>
+<span class="sourceLineNo">182</span><a name="line.182"></a>
+<span class="sourceLineNo">183</span>  /**<a name="line.183"></a>
+<span class="sourceLineNo">184</span>   * Helper method that converts a String to a Class using this<a name="line.184"></a>
+<span class="sourceLineNo">185</span>   * ClassHierarchy's classloader.<a name="line.185"></a>
+<span class="sourceLineNo">186</span>   */<a name="line.186"></a>
+<span class="sourceLineNo">187</span>  @Override<a name="line.187"></a>
+<span class="sourceLineNo">188</span>  public Class&lt;?&gt; classForName(String name) throws ClassNotFoundException {<a name="line.188"></a>
+<span class="sourceLineNo">189</span>    return ReflectionUtilities.classForName(name, loader);<a name="line.189"></a>
+<span class="sourceLineNo">190</span>  }<a name="line.190"></a>
+<span class="sourceLineNo">191</span><a name="line.191"></a>
+<span class="sourceLineNo">192</span>  private &lt;T, U&gt; Node buildPathToNode(Class&lt;U&gt; clazz)<a name="line.192"></a>
+<span class="sourceLineNo">193</span>      throws ClassHierarchyException {<a name="line.193"></a>
+<span class="sourceLineNo">194</span>    String[] path = clazz.getName().split("\\$");<a name="line.194"></a>
+<span class="sourceLineNo">195</span><a name="line.195"></a>
+<span class="sourceLineNo">196</span>    Node root = namespace;<a name="line.196"></a>
+<span class="sourceLineNo">197</span>    for (int i = 0; i &lt; path.length - 1; i++) {<a name="line.197"></a>
+<span class="sourceLineNo">198</span>      root = root.get(path[i]);<a name="line.198"></a>
+<span class="sourceLineNo">199</span>    }<a name="line.199"></a>
+<span class="sourceLineNo">200</span><a name="line.200"></a>
+<span class="sourceLineNo">201</span>    if (root == null) {<a name="line.201"></a>
+<span class="sourceLineNo">202</span>      throw new NullPointerException();<a name="line.202"></a>
+<span class="sourceLineNo">203</span>    }<a name="line.203"></a>
+<span class="sourceLineNo">204</span>    Node parent = root;<a name="line.204"></a>
+<span class="sourceLineNo">205</span><a name="line.205"></a>
+<span class="sourceLineNo">206</span>    Type argType = ReflectionUtilities.getNamedParameterTargetOrNull(clazz);<a name="line.206"></a>
+<span class="sourceLineNo">207</span><a name="line.207"></a>
+<span class="sourceLineNo">208</span>    if (argType == null) {<a name="line.208"></a>
+<span class="sourceLineNo">209</span>      return JavaNodeFactory.createClassNode(parent, clazz);<a name="line.209"></a>
+<span class="sourceLineNo">210</span>    } else {<a name="line.210"></a>
+<span class="sourceLineNo">211</span><a name="line.211"></a>
+<span class="sourceLineNo">212</span>      @SuppressWarnings("unchecked")<a name="line.212"></a>
+<span class="sourceLineNo">213</span>      // checked inside of NamedParameterNode, using reflection.<a name="line.213"></a>
+<span class="sourceLineNo">214</span>          NamedParameterNode&lt;T&gt; np = JavaNodeFactory.createNamedParameterNode(<a name="line.214"></a>
+<span class="sourceLineNo">215</span>          parent, (Class&lt;? extends Name&lt;T&gt;&gt;) clazz, argType);<a name="line.215"></a>
+<span class="sourceLineNo">216</span><a name="line.216"></a>
+<span class="sourceLineNo">217</span>      if (parameterParser.canParse(ReflectionUtilities.getFullName(argType))) {<a name="line.217"></a>
+<span class="sourceLineNo">218</span>        if (clazz.getAnnotation(NamedParameter.class).default_class() != Void.class) {<a name="line.218"></a>
+<span class="sourceLineNo">219</span>          throw new ClassHierarchyException("Named parameter " + ReflectionUtilities.getFullName(clazz) + " defines default implementation for parsable type " + ReflectionUtilities.getFullName(argType));<a name="line.219"></a>
+<span class="sourceLineNo">220</span>        }<a name="line.220"></a>
+<span class="sourceLineNo">221</span>      }<a name="line.221"></a>
+<span class="sourceLineNo">222</span><a name="line.222"></a>
+<span class="sourceLineNo">223</span>      String shortName = np.getShortName();<a name="line.223"></a>
+<span class="sourceLineNo">224</span>      if (shortName != null) {<a name="line.224"></a>
+<span class="sourceLineNo">225</span>        NamedParameterNode&lt;?&gt; oldNode = shortNames.get(shortName);<a name="line.225"></a>
+<span class="sourceLineNo">226</span>        if (oldNode != null) {<a name="line.226"></a>
+<span class="sourceLineNo">227</span>          if (oldNode.getFullName().equals(np.getFullName())) {<a name="line.227"></a>
+<span class="sourceLineNo">228</span>            throw new IllegalStateException("Tried to double bind "<a name="line.228"></a>
+<span class="sourceLineNo">229</span>                + oldNode.getFullName() + " to short name " + shortName);<a name="line.229"></a>
+<span class="sourceLineNo">230</span>          }<a name="line.230"></a>
+<span class="sourceLineNo">231</span>          throw new ClassHierarchyException("Named parameters " + oldNode.getFullName()<a name="line.231"></a>
+<span class="sourceLineNo">232</span>              + " and " + np.getFullName() + " have the same short name: "<a name="line.232"></a>
+<span class="sourceLineNo">233</span>              + shortName);<a name="line.233"></a>
+<span class="sourceLineNo">234</span>        }<a name="line.234"></a>
+<span class="sourceLineNo">235</span>        shortNames.put(shortName, np);<a name="line.235"></a>
+<span class="sourceLineNo">236</span>      }<a name="line.236"></a>
+<span class="sourceLineNo">237</span>      return np;<a name="line.237"></a>
+<span class="sourceLineNo">238</span>    }<a name="line.238"></a>
+<span class="sourceLineNo">239</span>  }<a name="line.239"></a>
+<span class="sourceLineNo">240</span><a name="line.240"></a>
+<span class="sourceLineNo">241</span>  private Node getAlreadyBoundNode(Class&lt;?&gt; clazz) throws NameResolutionException {<a name="line.241"></a>
+<span class="sourceLineNo">242</span>    return getAlreadyBoundNode(ReflectionUtilities.getFullName(clazz));<a name="line.242"></a>
+<span class="sourceLineNo">243</span>  }<a name="line.243"></a>
+<span class="sourceLineNo">244</span><a name="line.244"></a>
+<span class="sourceLineNo">245</span>  @Override<a name="line.245"></a>
+<span class="sourceLineNo">246</span>  public Node getNode(Class&lt;?&gt; clazz) {<a name="line.246"></a>
+<span class="sourceLineNo">247</span>    try {<a name="line.247"></a>
+<span class="sourceLineNo">248</span>      return getNode(ReflectionUtilities.getFullName(clazz));<a name="line.248"></a>
+<span class="sourceLineNo">249</span>    } catch (NameResolutionException e) {<a name="line.249"></a>
+<span class="sourceLineNo">250</span>      throw new ClassHierarchyException("JavaClassHierarchy could not resolve " + clazz<a name="line.250"></a>
+<span class="sourceLineNo">251</span>          + " which is definitely avalable at runtime", e);<a name="line.251"></a>
+<span class="sourceLineNo">252</span>    }<a name="line.252"></a>
+<span class="sourceLineNo">253</span>  }<a name="line.253"></a>
+<span class="sourceLineNo">254</span><a name="line.254"></a>
+<span class="sourceLineNo">255</span>  @Override<a name="line.255"></a>
+<span class="sourceLineNo">256</span>  public synchronized Node getNode(String name) throws NameResolutionException {<a name="line.256"></a>
+<span class="sourceLineNo">257</span>    Node n = register(name);<a name="line.257"></a>
+<span class="sourceLineNo">258</span>    if (n == null) {<a name="line.258"></a>
+<span class="sourceLineNo">259</span>      // This will never succeed; it just generates a nice exception.<a name="line.259"></a>
+<span class="sourceLineNo">260</span>      getAlreadyBoundNode(name);<a name="line.260"></a>
+<span class="sourceLineNo">261</span>      throw new IllegalStateException("IMPLEMENTATION BUG: Register failed, "<a name="line.261"></a>
+<span class="sourceLineNo">262</span>          + "but getAlreadyBoundNode succeeded!");<a name="line.262"></a>
+<span class="sourceLineNo">263</span>    }<a name="line.263"></a>
+<span class="sourceLineNo">264</span>    return n;<a name="line.264"></a>
+<span class="sourceLineNo">265</span>  }<a name="line.265"></a>
+<span class="sourceLineNo">266</span><a name="line.266"></a>
+<span class="sourceLineNo">267</span>  private Node getAlreadyBoundNode(String name) throws NameResolutionException {<a name="line.267"></a>
+<span class="sourceLineNo">268</span>    Node root = namespace;<a name="line.268"></a>
+<span class="sourceLineNo">269</span>    String[] toks = name.split("\\$");<a name="line.269"></a>
+<span class="sourceLineNo">270</span>    String outerClassName = toks[0];<a name="line.270"></a>
+<span class="sourceLineNo">271</span>    root = root.get(outerClassName);<a name="line.271"></a>
+<span class="sourceLineNo">272</span>    if (root == null) {<a name="line.272"></a>
+<span class="sourceLineNo">273</span>      throw new NameResolutionException(name, outerClassName);<a name="line.273"></a>
+<span class="sourceLineNo">274</span>    }<a name="line.274"></a>
+<span class="sourceLineNo">275</span>    for (int i = 1; i &lt; toks.length; i++) {<a name="line.275"></a>
+<span class="sourceLineNo">276</span>      root = root.get(toks[i]);<a name="line.276"></a>
+<span class="sourceLineNo">277</span>      if (root == null) {<a name="line.277"></a>
+<span class="sourceLineNo">278</span>        StringBuilder sb = new StringBuilder(outerClassName);<a name="line.278"></a>
+<span class="sourceLineNo">279</span>        for (int j = 0; j &lt; i; j++) {<a name="line.279"></a>
+<span class="sourceLineNo">280</span>          sb.append(toks[j]);<a name="line.280"></a>
+<span class="sourceLineNo">281</span>          if (j != i - 1) {<a name="line.281"></a>
+<span class="sourceLineNo">282</span>            sb.append(".");<a name="line.282"></a>
+<span class="sourceLineNo">283</span>          }<a name="line.283"></a>
+<span class="sourceLineNo">284</span>        }<a name="line.284"></a>
+<span class="sourceLineNo">285</span>        throw new NameResolutionException(name, sb.toString());<a name="line.285"></a>
+<span class="sourceLineNo">286</span>      }<a name="line.286"></a>
+<span class="sourceLineNo">287</span>    }<a name="line.287"></a>
+<span class="sourceLineNo">288</span>    return root;<a name="line.288"></a>
+<span class="sourceLineNo">289</span>  }<a name="line.289"></a>
+<span class="sourceLineNo">290</span><a name="line.290"></a>
+<span class="sourceLineNo">291</span>  private Node register(String s) {<a name="line.291"></a>
+<span class="sourceLineNo">292</span>    final Class&lt;?&gt; c;<a name="line.292"></a>
+<span class="sourceLineNo">293</span>    try {<a name="line.293"></a>
+<span class="sourceLineNo">294</span>      c = classForName(s);<a name="line.294"></a>
+<span class="sourceLineNo">295</span>    } catch (ClassNotFoundException e1) {<a name="line.295"></a>
+<span class="sourceLineNo">296</span>      return null;<a name="line.296"></a>
+<span class="sourceLineNo">297</span>    }<a name="line.297"></a>
+<span class="sourceLineNo">298</span>    try {<a name="line.298"></a>
+<span class="sourceLineNo">299</span>      Node n = getAlreadyBoundNode(c);<a name="line.299"></a>
+<span class="sourceLineNo">300</span>      return n;<a name="line.300"></a>
+<span class="sourceLineNo">301</span>    } catch (NameResolutionException e) {<a name="line.301"></a>
+<span class="sourceLineNo">302</span>    }<a name="line.302"></a>
+<span class="sourceLineNo">303</span>    // First, walk up the class hierarchy, registering all out parents. This<a name="line.303"></a>
+<span class="sourceLineNo">304</span>    // can't be loopy.<a name="line.304"></a>
+<span class="sourceLineNo">305</span>    if (c.getSuperclass() != null) {<a name="line.305"></a>
+<span class="sourceLineNo">306</span>      register(ReflectionUtilities.getFullName(c.getSuperclass()));<a name="line.306"></a>
+<span class="sourceLineNo">307</span>    }<a name="line.307"></a>
+<span class="sourceLineNo">308</span>    for (Class&lt;?&gt; i : c.getInterfaces()) {<a name="line.308"></a>
+<span class="sourceLineNo">309</span>      register(ReflectionUtilities.getFullName(i));<a name="line.309"></a>
+<span class="sourceLineNo">310</span>    }<a name="line.310"></a>
+<span class="sourceLineNo">311</span>    // Now, we'd like to register our enclosing classes. This turns out to be<a name="line.311"></a>
+<span class="sourceLineNo">312</span>    // safe.<a name="line.312"></a>
+<span class="sourceLineNo">313</span>    // Thankfully, Java doesn't allow:<a name="line.313"></a>
+<span class="sourceLineNo">314</span>    // class A implements A.B { class B { } }<a name="line.314"></a>
+<span class="sourceLineNo">315</span><a name="line.315"></a>
+<span class="sourceLineNo">316</span>    // It also doesn't allow cycles such as:<a name="line.316"></a>
+<span class="sourceLineNo">317</span>    // class A implements B.BB { interface AA { } }<a name="line.317"></a>
+<span class="sourceLineNo">318</span>    // class B implements A.AA { interface BB { } }<a name="line.318"></a>
+<span class="sourceLineNo">319</span><a name="line.319"></a>
+<span class="sourceLineNo">320</span>    // So, even though grafting arbitrary DAGs together can give us cycles, Java<a name="line.320"></a>
+<span class="sourceLineNo">321</span>    // seems<a name="line.321"></a>
+<span class="sourceLineNo">322</span>    // to have our back on this one.<a name="line.322"></a>
+<span class="sourceLineNo">323</span>    Class&lt;?&gt; enclosing = c.getEnclosingClass();<a name="line.323"></a>
+<span class="sourceLineNo">324</span>    if (enclosing != null) {<a name="line.324"></a>
+<span class="sourceLineNo">325</span>      register(ReflectionUtilities.getFullName(enclosing));<a name="line.325"></a>
+<span class="sourceLineNo">326</span>    }<a name="line.326"></a>
+<span class="sourceLineNo">327</span><a name="line.327"></a>
+<span class="sourceLineNo">328</span>    // Now register the class. This has to be after the above so we know our<a name="line.328"></a>
+<span class="sourceLineNo">329</span>    // parents (superclasses and enclosing packages) are already registered.<a name="line.329"></a>
+<span class="sourceLineNo">330</span>    Node n = registerClass(c);<a name="line.330"></a>
+<span class="sourceLineNo">331</span><a name="line.331"></a>
+<span class="sourceLineNo">332</span>    // Finally, do things that might introduce cycles that invlove c.<a name="line.332"></a>
+<span class="sourceLineNo">333</span>    // This has to be below registerClass, which ensures that any cycles<a name="line.333"></a>
+<span class="sourceLineNo">334</span>    // this stuff introduces are broken.<a name="line.334"></a>
+<span class="sourceLineNo">335</span>    for (Class&lt;?&gt; inner_class : c.getDeclaredClasses()) {<a name="line.335"></a>
+<span class="sourceLineNo">336</span>      register(ReflectionUtilities.getFullName(inner_class));<a name="line.336"></a>
+<span class="sourceLineNo">337</span>    }<a name="line.337"></a>
+<span class="sourceLineNo">338</span>    if (n instanceof ClassNode) {<a name="line.338"></a>
+<span class="sourceLineNo">339</span>      ClassNode&lt;?&gt; cls = (ClassNode&lt;?&gt;) n;<a name="line.339"></a>
+<span class="sourceLineNo">340</span>      for (ConstructorDef&lt;?&gt; def : cls.getInjectableConstructors()) {<a name="line.340"></a>
+<span class="sourceLineNo">341</span>        for (ConstructorArg arg : def.getArgs()) {<a name="line.341"></a>
+<span class="sourceLineNo">342</span>          register(arg.getType());<a name="line.342"></a>
+<span class="sourceLineNo">343</span>          if (arg.getNamedParameterName() != null) {<a name="line.343"></a>
+<span class="sourceLineNo">344</span>            NamedParameterNode&lt;?&gt; np = (NamedParameterNode&lt;?&gt;) register(arg<a name="line.344"></a>
+<span class="sourceLineNo">345</span>                .getNamedParameterName());<a name="line.345"></a>
+<span class="sourceLineNo">346</span>            try {<a name="line.346"></a>
+<span class="sourceLineNo">347</span>              if (np.isSet()) {<a name="line.347"></a>
+<span class="sourceLineNo">348</span>                /// XXX When handling sets, need to track target of generic parameter, and check the type here!<a name="line.348"></a>
+<span class="sourceLineNo">349</span>              } else if (np.isList()) {<a name="line.349"></a>
+<span class="sourceLineNo">350</span><a name="line.350"></a>
+<span class="sourceLineNo">351</span>              } else {<a name="line.351"></a>
+<span class="sourceLineNo">352</span>                if (!ReflectionUtilities.isCoercable(classForName(arg.getType()),<a name="line.352"></a>
+<span class="sourceLineNo">353</span>                    classForName(np.getFullArgName()))) {<a name="line.353"></a>
+<span class="sourceLineNo">354</span>                  throw new ClassHierarchyException(<a name="line.354"></a>
+<span class="sourceLineNo">355</span>                      "Named parameter type mismatch in " + cls.getFullName() + ".  Constructor expects a "<a name="line.355"></a>
+<span class="sourceLineNo">356</span>                          + arg.getType() + " but " + np.getName() + " is a "<a name="line.356"></a>
+<span class="sourceLineNo">357</span>                          + np.getFullArgName());<a name="line.357"></a>
+<span class="sourceLineNo">358</span>                }<a name="line.358"></a>
+<span class="sourceLineNo">359</span>              }<a name="line.359"></a>
+<span class="sourceLineNo">360</span>            } catch (ClassNotFoundException e) {<a name="line.360"></a>
+<span class="sourceLineNo">361</span>              throw new ClassHierarchyException("Constructor refers to unknown class "<a name="line.361"></a>
+<span class="sourceLineNo">362</span>                  + arg.getType(), e);<a name="line.362"></a>
+<span class="sourceLineNo">363</span>            }<a name="line.363"></a>
+<span class="sourceLineNo">364</span>          }<a name="line.364"></a>
+<span class="sourceLineNo">365</span>        }<a name="line.365"></a>
+<span class="sourceLineNo">366</span>      }<a name="line.366"></a>
+<span class="sourceLineNo">367</span>    } else if (n instanceof NamedParameterNode) {<a name="line.367"></a>
+<span class="sourceLineNo">368</span>      NamedParameterNode&lt;?&gt; np = (NamedParameterNode&lt;?&gt;) n;<a name="line.368"></a>
+<span class="sourceLineNo">369</span>      register(np.getFullArgName());<a name="line.369"></a>
+<span class="sourceLineNo">370</span>    }<a name="line.370"></a>
+<span class="sourceLineNo">371</span>    return n;<a name="line.371"></a>
+<span class="sourceLineNo">372</span>  }<a name="line.372"></a>
+<span class="sourceLineNo">373</span><a name="line.373"></a>
+<span class="sourceLineNo">374</span>  /**<a name="line.374"></a>
+<span class="sourceLineNo">375</span>   * Assumes that all of the parents of c have been registered already.<a name="line.375"></a>
+<span class="sourceLineNo">376</span>   *<a name="line.376"></a>
+<span class="sourceLineNo">377</span>   * @param c<a name="line.377"></a>
+<span class="sourceLineNo">378</span>   */<a name="line.378"></a>
+<span class="sourceLineNo">379</span>  @SuppressWarnings("unchecked")<a name="line.379"></a>
+<span class="sourceLineNo">380</span>  private &lt;T&gt; Node registerClass(final Class&lt;T&gt; c)<a name="line.380"></a>
+<span class="sourceLineNo">381</span>      throws ClassHierarchyException {<a name="line.381"></a>
+<span class="sourceLineNo">382</span>    if (c.isArray()) {<a name="line.382"></a>
+<span class="sourceLineNo">383</span>      throw new UnsupportedOperationException("Can't register array types");<a name="line.383"></a>
+<span class="sourceLineNo">384</span>    }<a name="line.384"></a>
+<span class="sourceLineNo">385</span>    try {<a name="line.385"></a>
+<span class="sourceLineNo">386</span>      return getAlreadyBoundNode(c);<a name="line.386"></a>
+<span class="sourceLineNo">387</span>    } catch (NameResolutionException e) {<a name="line.387"></a>
+<span class="sourceLineNo">388</span>    }<a name="line.388"></a>
+<span class="sourceLineNo">389</span><a name="line.389"></a>
+<span class="sourceLineNo">390</span>    final Node n = buildPathToNode(c);<a name="line.390"></a>
+<span class="sourceLineNo">391</span><a name="line.391"></a>
+<span class="sourceLineNo">392</span>    if (n instanceof ClassNode) {<a name="line.392"></a>
+<span class="sourceLineNo">393</span>      ClassNode&lt;T&gt; cn = (ClassNode&lt;T&gt;) n;<a name="line.393"></a>
+<span class="sourceLineNo">394</span>      Class&lt;T&gt; superclass = (Class&lt;T&gt;) c.getSuperclass();<a name="line.394"></a>
+<span class="sourceLineNo">395</span>      if (superclass != null) {<a name="line.395"></a>
+<span class="sourceLineNo">396</span>        try {<a name="line.396"></a>
+<span class="sourceLineNo">397</span>          ((ClassNode&lt;T&gt;) getAlreadyBoundNode(superclass)).putImpl(cn);<a name="line.397"></a>
+<span class="sourceLineNo">398</span>        } catch (NameResolutionException e) {<a name="line.398"></a>
+<span class="sourceLineNo">399</span>          throw new IllegalStateException(e);<a name="line.399"></a>
+<span class="sourceLineNo">400</span>        }<a name="line.400"></a>
+<span class="sourceLineNo">401</span>      }<a name="line.401"></a>
+<span class="sourceLineNo">402</span>      for (Class&lt;?&gt; interf : c.getInterfaces()) {<a name="line.402"></a>
+<span class="sourceLineNo">403</span>        try {<a name="line.403"></a>
+<span class="sourceLineNo">404</span>          ((ClassNode&lt;T&gt;) getAlreadyBoundNode(interf)).putImpl(cn);<a name="line.404"></a>
+<span class="sourceLineNo">405</span>        } catch (NameResolutionException e) {<a name="line.405"></a>
+<span class="sourceLineNo">406</span>          throw new IllegalStateException(e);<a name="line.406"></a>
+<span class="sourceLineNo">407</span>        }<a name="line.407"></a>
+<span class="sourceLineNo">408</span>      }<a name="line.408"></a>
+<span class="sourceLineNo">409</span>    }<a name="line.409"></a>
+<span class="sourceLineNo">410</span>    return n;<a name="line.410"></a>
+<span class="sourceLineNo">411</span>  }<a name="line.411"></a>
+<span class="sourceLineNo">412</span><a name="line.412"></a>
+<span class="sourceLineNo">413</span>  @Override<a name="line.413"></a>
+<span class="sourceLineNo">414</span>  public PackageNode getNamespace() {<a name="line.414"></a>
+<span class="sourceLineNo">415</span>    return namespace;<a name="line.415"></a>
+<span class="sourceLineNo">416</span>  }<a name="line.416"></a>
+<span class="sourceLineNo">417</span><a name="line.417"></a>
+<span class="sourceLineNo">418</span>  @Override<a name="line.418"></a>
+<span class="sourceLineNo">419</span>  public synchronized boolean isImplementation(ClassNode&lt;?&gt; inter, ClassNode&lt;?&gt; impl) {<a name="line.419"></a>
+<span class="sourceLineNo">420</span>    return impl.isImplementationOf(inter);<a name="line.420"></a>
+<span class="sourceLineNo">421</span>  }<a name="line.421"></a>
+<span class="sourceLineNo">422</span><a name="line.422"></a>
+<span class="sourceLineNo">423</span>  @Override<a name="line.423"></a>
+<span class="sourceLineNo">424</span>  public synchronized ClassHierarchy merge(ClassHierarchy ch) {<a name="line.424"></a>
+<span class="sourceLineNo">425</span>    if (this == ch) {<a name="line.425"></a>
+<span class="sourceLineNo">426</span>      return this;<a name="line.426"></a>
+<span class="sourceLineNo">427</span>    }<a name="line.427"></a>
+<span class="sourceLineNo">428</span>    if (!(ch instanceof ClassHierarchyImpl)) {<a name="line.428"></a>
+<span class="sourceLineNo">429</span>      throw new UnsupportedOperationException("Can't merge java and non-java class hierarchies yet!");<a name="line.429"></a>
+<span class="sourceLineNo">430</span>    }<a name="line.430"></a>
+<span class="sourceLineNo">431</span>    if (this.jars.size() == 0) {<a name="line.431"></a>
+<span class="sourceLineNo">432</span>      return ch;<a name="line.432"></a>
+<span class="sourceLineNo">433</span>    }<a name="line.433"></a>
+<span class="sourceLineNo">434</span>    ClassHierarchyImpl chi = (ClassHierarchyImpl) ch;<a name="line.434"></a>
+<span class="sourceLineNo">435</span>    HashSet&lt;URL&gt; otherJars = new HashSet&lt;&gt;();<a name="line.435"></a>
+<span class="sourceLineNo">436</span>    otherJars.addAll(chi.jars);<a name="line.436"></a>
+<span class="sourceLineNo">437</span>    HashSet&lt;URL&gt; myJars = new HashSet&lt;&gt;();<a name="line.437"></a>
+<span class="sourceLineNo">438</span>    myJars.addAll(this.jars);<a name="line.438"></a>
+<span class="sourceLineNo">439</span>    if (myJars.containsAll(otherJars)) {<a name="line.439"></a>
+<span class="sourceLineNo">440</span>      return this;<a name="line.440"></a>
+<span class="sourceLineNo">441</span>    } else if (otherJars.containsAll(myJars)) {<a name="line.441"></a>
+<span class="sourceLineNo">442</span>      return ch;<a name="line.442"></a>
+<span class="sourceLineNo">443</span>    } else {<a name="line.443"></a>
+<span class="sourceLineNo">444</span>      myJars.addAll(otherJars);<a name="line.444"></a>
+<span class="sourceLineNo">445</span>      return new ClassHierarchyImpl(myJars.toArray(new URL[0]));<a name="line.445"></a>
+<span class="sourceLineNo">446</span>    }<a name="line.446"></a>
+<span class="sourceLineNo">447</span>  }<a name="line.447"></a>
+<span class="sourceLineNo">448</span>}<a name="line.448"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

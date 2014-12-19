@@ -1,0 +1,469 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>/**<a name="line.1"></a>
+<span class="sourceLineNo">002</span> * Licensed to the Apache Software Foundation (ASF) under one<a name="line.2"></a>
+<span class="sourceLineNo">003</span> * or more contributor license agreements.  See the NOTICE file<a name="line.3"></a>
+<span class="sourceLineNo">004</span> * distributed with this work for additional information<a name="line.4"></a>
+<span class="sourceLineNo">005</span> * regarding copyright ownership.  The ASF licenses this file<a name="line.5"></a>
+<span class="sourceLineNo">006</span> * to you under the Apache License, Version 2.0 (the<a name="line.6"></a>
+<span class="sourceLineNo">007</span> * "License"); you may not use this file except in compliance<a name="line.7"></a>
+<span class="sourceLineNo">008</span> * with the License.  You may obtain a copy of the License at<a name="line.8"></a>
+<span class="sourceLineNo">009</span> *<a name="line.9"></a>
+<span class="sourceLineNo">010</span> *   http://www.apache.org/licenses/LICENSE-2.0<a name="line.10"></a>
+<span class="sourceLineNo">011</span> *<a name="line.11"></a>
+<span class="sourceLineNo">012</span> * Unless required by applicable law or agreed to in writing,<a name="line.12"></a>
+<span class="sourceLineNo">013</span> * software distributed under the License is distributed on an<a name="line.13"></a>
+<span class="sourceLineNo">014</span> * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY<a name="line.14"></a>
+<span class="sourceLineNo">015</span> * KIND, either express or implied.  See the License for the<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * specific language governing permissions and limitations<a name="line.16"></a>
+<span class="sourceLineNo">017</span> * under the License.<a name="line.17"></a>
+<span class="sourceLineNo">018</span> */<a name="line.18"></a>
+<span class="sourceLineNo">019</span>package org.apache.reef.tang.util;<a name="line.19"></a>
+<span class="sourceLineNo">020</span><a name="line.20"></a>
+<span class="sourceLineNo">021</span>import org.apache.reef.tang.annotations.Name;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import org.apache.reef.tang.annotations.NamedParameter;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import org.apache.reef.tang.exceptions.BindException;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>import org.apache.reef.tang.exceptions.ClassHierarchyException;<a name="line.24"></a>
+<span class="sourceLineNo">025</span><a name="line.25"></a>
+<span class="sourceLineNo">026</span>import javax.inject.Inject;<a name="line.26"></a>
+<span class="sourceLineNo">027</span>import java.lang.annotation.Annotation;<a name="line.27"></a>
+<span class="sourceLineNo">028</span>import java.lang.reflect.*;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>import java.util.*;<a name="line.29"></a>
+<span class="sourceLineNo">030</span><a name="line.30"></a>
+<span class="sourceLineNo">031</span>public class ReflectionUtilities {<a name="line.31"></a>
+<span class="sourceLineNo">032</span>  /**<a name="line.32"></a>
+<span class="sourceLineNo">033</span>   * This is used to split Java classnames.  Currently, we split on . and on $<a name="line.33"></a>
+<span class="sourceLineNo">034</span>   */<a name="line.34"></a>
+<span class="sourceLineNo">035</span>  public final static String regexp = "[\\.\\$]";<a name="line.35"></a>
+<span class="sourceLineNo">036</span>  /**<a name="line.36"></a>
+<span class="sourceLineNo">037</span>   * A map from numeric classes to the number of bits used by their representations.<a name="line.37"></a>
+<span class="sourceLineNo">038</span>   */<a name="line.38"></a>
+<span class="sourceLineNo">039</span>  private final static Map&lt;Class&lt;?&gt;, Integer&gt; sizeof = new HashMap&lt;&gt;();<a name="line.39"></a>
+<span class="sourceLineNo">040</span><a name="line.40"></a>
+<span class="sourceLineNo">041</span>  static {<a name="line.41"></a>
+<span class="sourceLineNo">042</span>    sizeof.put(Byte.class, Byte.SIZE);<a name="line.42"></a>
+<span class="sourceLineNo">043</span>    sizeof.put(Short.class, Short.SIZE);<a name="line.43"></a>
+<span class="sourceLineNo">044</span>    sizeof.put(Integer.class, Integer.SIZE);<a name="line.44"></a>
+<span class="sourceLineNo">045</span>    sizeof.put(Long.class, Long.SIZE);<a name="line.45"></a>
+<span class="sourceLineNo">046</span>    sizeof.put(Float.class, Float.SIZE);<a name="line.46"></a>
+<span class="sourceLineNo">047</span>    sizeof.put(Double.class, Double.SIZE);<a name="line.47"></a>
+<span class="sourceLineNo">048</span>  }<a name="line.48"></a>
+<span class="sourceLineNo">049</span><a name="line.49"></a>
+<span class="sourceLineNo">050</span>  /**<a name="line.50"></a>
+<span class="sourceLineNo">051</span>   * Given a primitive type, return its boxed representation.<a name="line.51"></a>
+<span class="sourceLineNo">052</span>   * &lt;p/&gt;<a name="line.52"></a>
+<span class="sourceLineNo">053</span>   * Examples:<a name="line.53"></a>
+<span class="sourceLineNo">054</span>   * boxClass(int.class) -&gt; Integer.class<a name="line.54"></a>
+<span class="sourceLineNo">055</span>   * boxClass(String.class) -&gt; String.class<a name="line.55"></a>
+<span class="sourceLineNo">056</span>   *<a name="line.56"></a>
+<span class="sourceLineNo">057</span>   * @param c The class to be boxed.<a name="line.57"></a>
+<span class="sourceLineNo">058</span>   * @return The boxed version of c, or c if it is not a primitive type.<a name="line.58"></a>
+<span class="sourceLineNo">059</span>   */<a name="line.59"></a>
+<span class="sourceLineNo">060</span>  public static Class&lt;?&gt; boxClass(Class&lt;?&gt; c) {<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    if (c.isPrimitive() &amp;&amp; c != Class.class) {<a name="line.61"></a>
+<span class="sourceLineNo">062</span>      if (c == boolean.class) {<a name="line.62"></a>
+<span class="sourceLineNo">063</span>        return Boolean.class;<a name="line.63"></a>
+<span class="sourceLineNo">064</span>      } else if (c == byte.class) {<a name="line.64"></a>
+<span class="sourceLineNo">065</span>        return Byte.class;<a name="line.65"></a>
+<span class="sourceLineNo">066</span>      } else if (c == char.class) {<a name="line.66"></a>
+<span class="sourceLineNo">067</span>        return Character.class;<a name="line.67"></a>
+<span class="sourceLineNo">068</span>      } else if (c == short.class) {<a name="line.68"></a>
+<span class="sourceLineNo">069</span>        return Short.class;<a name="line.69"></a>
+<span class="sourceLineNo">070</span>      } else if (c == int.class) {<a name="line.70"></a>
+<span class="sourceLineNo">071</span>        return Integer.class;<a name="line.71"></a>
+<span class="sourceLineNo">072</span>      } else if (c == long.class) {<a name="line.72"></a>
+<span class="sourceLineNo">073</span>        return Long.class;<a name="line.73"></a>
+<span class="sourceLineNo">074</span>      } else if (c == float.class) {<a name="line.74"></a>
+<span class="sourceLineNo">075</span>        return Float.class;<a name="line.75"></a>
+<span class="sourceLineNo">076</span>      } else if (c == double.class) {<a name="line.76"></a>
+<span class="sourceLineNo">077</span>        return Double.class;<a name="line.77"></a>
+<span class="sourceLineNo">078</span>      } else if (c == void.class) {<a name="line.78"></a>
+<span class="sourceLineNo">079</span>        return Void.class;<a name="line.79"></a>
+<span class="sourceLineNo">080</span>      } else {<a name="line.80"></a>
+<span class="sourceLineNo">081</span>        throw new UnsupportedOperationException(<a name="line.81"></a>
+<span class="sourceLineNo">082</span>            "Encountered unknown primitive type!");<a name="line.82"></a>
+<span class="sourceLineNo">083</span>      }<a name="line.83"></a>
+<span class="sourceLineNo">084</span>    } else {<a name="line.84"></a>
+<span class="sourceLineNo">085</span>      return c;<a name="line.85"></a>
+<span class="sourceLineNo">086</span>    }<a name="line.86"></a>
+<span class="sourceLineNo">087</span>  }<a name="line.87"></a>
+<span class="sourceLineNo">088</span><a name="line.88"></a>
+<span class="sourceLineNo">089</span>  /**<a name="line.89"></a>
+<span class="sourceLineNo">090</span>   * Given a Type, return all of the classes it extends and interfaces it implements (including the class itself).<a name="line.90"></a>
+<span class="sourceLineNo">091</span>   * &lt;p/&gt;<a name="line.91"></a>
+<span class="sourceLineNo">092</span>   * Examples:<a name="line.92"></a>
+<span class="sourceLineNo">093</span>   * Integer.class -&gt; {Integer.class, Number.class, Object.class}<a name="line.93"></a>
+<span class="sourceLineNo">094</span>   * T -&gt; Object<a name="line.94"></a>
+<span class="sourceLineNo">095</span>   * ? -&gt; Object<a name="line.95"></a>
+<span class="sourceLineNo">096</span>   * HashSet&lt;T&gt; -&gt; {HashSet&lt;T&gt;, Set&lt;T&gt;, Collection&lt;T&gt;, Object}<a name="line.96"></a>
+<span class="sourceLineNo">097</span>   * FooEventHandler -&gt; {FooEventHandler, EventHandler&lt;Foo&gt;, Object}<a name="line.97"></a>
+<span class="sourceLineNo">098</span>   */<a name="line.98"></a>
+<span class="sourceLineNo">099</span>  public static Iterable&lt;Type&gt; classAndAncestors(Type c) {<a name="line.99"></a>
+<span class="sourceLineNo">100</span>    List&lt;Type&gt; workQueue = new ArrayList&lt;&gt;();<a name="line.100"></a>
+<span class="sourceLineNo">101</span><a name="line.101"></a>
+<span class="sourceLineNo">102</span>    workQueue.add(c);<a name="line.102"></a>
+<span class="sourceLineNo">103</span>    if (getRawClass(c).isInterface()) {<a name="line.103"></a>
+<span class="sourceLineNo">104</span>      workQueue.add(Object.class);<a name="line.104"></a>
+<span class="sourceLineNo">105</span>    }<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    for (int i = 0; i &lt; workQueue.size(); i++) {<a name="line.106"></a>
+<span class="sourceLineNo">107</span>      c = workQueue.get(i);<a name="line.107"></a>
+<span class="sourceLineNo">108</span><a name="line.108"></a>
+<span class="sourceLineNo">109</span>      if (c instanceof Class) {<a name="line.109"></a>
+<span class="sourceLineNo">110</span>        Class&lt;?&gt; clz = (Class&lt;?&gt;) c;<a name="line.110"></a>
+<span class="sourceLineNo">111</span>        final Type sc = clz.getSuperclass();<a name="line.111"></a>
+<span class="sourceLineNo">112</span>        if (sc != null) workQueue.add(sc); //c.getSuperclass());<a name="line.112"></a>
+<span class="sourceLineNo">113</span>        workQueue.addAll(Arrays.asList(clz.getGenericInterfaces()));<a name="line.113"></a>
+<span class="sourceLineNo">114</span>      } else if (c instanceof ParameterizedType) {<a name="line.114"></a>
+<span class="sourceLineNo">115</span>        ParameterizedType pt = (ParameterizedType) c;<a name="line.115"></a>
+<span class="sourceLineNo">116</span>        Class&lt;?&gt; rawPt = (Class&lt;?&gt;) pt.getRawType();<a name="line.116"></a>
+<span class="sourceLineNo">117</span>        final Type sc = rawPt.getSuperclass();<a name="line.117"></a>
+<span class="sourceLineNo">118</span>//        workQueue.add(pt);<a name="line.118"></a>
+<span class="sourceLineNo">119</span>//        workQueue.add(rawPt);<a name="line.119"></a>
+<span class="sourceLineNo">120</span>        if (sc != null) workQueue.add(sc);<a name="line.120"></a>
+<span class="sourceLineNo">121</span>        workQueue.addAll(Arrays.asList(rawPt.getGenericInterfaces()));<a name="line.121"></a>
+<span class="sourceLineNo">122</span>      } else if (c instanceof WildcardType) {<a name="line.122"></a>
+<span class="sourceLineNo">123</span>        workQueue.add(Object.class); // XXX not really correct, but close enough?<a name="line.123"></a>
+<span class="sourceLineNo">124</span>      } else if (c instanceof TypeVariable) {<a name="line.124"></a>
+<span class="sourceLineNo">125</span>        workQueue.add(Object.class); // XXX not really correct, but close enough?<a name="line.125"></a>
+<span class="sourceLineNo">126</span>      } else {<a name="line.126"></a>
+<span class="sourceLineNo">127</span>        throw new RuntimeException(c.getClass() + " " + c + " is of unknown type!");<a name="line.127"></a>
+<span class="sourceLineNo">128</span>      }<a name="line.128"></a>
+<span class="sourceLineNo">129</span>    }<a name="line.129"></a>
+<span class="sourceLineNo">130</span>    return workQueue;<a name="line.130"></a>
+<span class="sourceLineNo">131</span>  }<a name="line.131"></a>
+<span class="sourceLineNo">132</span><a name="line.132"></a>
+<span class="sourceLineNo">133</span>  /**<a name="line.133"></a>
+<span class="sourceLineNo">134</span>   * Check to see if one class can be coerced into another.  A class is<a name="line.134"></a>
+<span class="sourceLineNo">135</span>   * coercable to another if, once both are boxed, the target class is a<a name="line.135"></a>
+<span class="sourceLineNo">136</span>   * superclass or implemented interface of the source class.<a name="line.136"></a>
+<span class="sourceLineNo">137</span>   * &lt;p/&gt;<a name="line.137"></a>
+<span class="sourceLineNo">138</span>   * If both classes are numeric types, then this method returns true iff<a name="line.138"></a>
+<span class="sourceLineNo">139</span>   * the conversion will not result in a loss of precision.<a name="line.139"></a>
+<span class="sourceLineNo">140</span>   * &lt;p/&gt;<a name="line.140"></a>
+<span class="sourceLineNo">141</span>   * TODO: Float and double are currently coercible to int and long.  This is a bug.<a name="line.141"></a>
+<span class="sourceLineNo">142</span>   */<a name="line.142"></a>
+<span class="sourceLineNo">143</span>  public static boolean isCoercable(Class&lt;?&gt; to, Class&lt;?&gt; from) {<a name="line.143"></a>
+<span class="sourceLineNo">144</span>    to = boxClass(to);<a name="line.144"></a>
+<span class="sourceLineNo">145</span>    from = boxClass(from);<a name="line.145"></a>
+<span class="sourceLineNo">146</span>    if (Number.class.isAssignableFrom(to)<a name="line.146"></a>
+<span class="sourceLineNo">147</span>        &amp;&amp; Number.class.isAssignableFrom(from)) {<a name="line.147"></a>
+<span class="sourceLineNo">148</span>      return sizeof.get(from) &lt;= sizeof.get(to);<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    }<a name="line.149"></a>
+<span class="sourceLineNo">150</span>    return to.isAssignableFrom(from);<a name="line.150"></a>
+<span class="sourceLineNo">151</span>  }<a name="line.151"></a>
+<span class="sourceLineNo">152</span><a name="line.152"></a>
+<span class="sourceLineNo">153</span>  /**<a name="line.153"></a>
+<span class="sourceLineNo">154</span>   * Lookup the provided name using the provided classloader. This method<a name="line.154"></a>
+<span class="sourceLineNo">155</span>   * includes special handling for primitive types, which can be looked up<a name="line.155"></a>
+<span class="sourceLineNo">156</span>   * by short name (all other types need to be looked up by long name).<a name="line.156"></a>
+<span class="sourceLineNo">157</span>   *<a name="line.157"></a>
+<span class="sourceLineNo">158</span>   * @throws ClassNotFoundException<a name="line.158"></a>
+<span class="sourceLineNo">159</span>   */<a name="line.159"></a>
+<span class="sourceLineNo">160</span>  public static Class&lt;?&gt; classForName(String name, ClassLoader loader)<a name="line.160"></a>
+<span class="sourceLineNo">161</span>      throws ClassNotFoundException {<a name="line.161"></a>
+<span class="sourceLineNo">162</span>    if (name.startsWith("[")) {<a name="line.162"></a>
+<span class="sourceLineNo">163</span>      throw new UnsupportedOperationException("No support for arrays, etc.  Name was: " + name);<a name="line.163"></a>
+<span class="sourceLineNo">164</span>    } else if (name.equals("boolean")) {<a name="line.164"></a>
+<span class="sourceLineNo">165</span>      return boolean.class;<a name="line.165"></a>
+<span class="sourceLineNo">166</span>    } else if (name.equals("byte")) {<a name="line.166"></a>
+<span class="sourceLineNo">167</span>      return byte.class;<a name="line.167"></a>
+<span class="sourceLineNo">168</span>    } else if (name.equals("char")) {<a name="line.168"></a>
+<span class="sourceLineNo">169</span>      return char.class;<a name="line.169"></a>
+<span class="sourceLineNo">170</span>    } else if (name.equals("short")) {<a name="line.170"></a>
+<span class="sourceLineNo">171</span>      return short.class;<a name="line.171"></a>
+<span class="sourceLineNo">172</span>    } else if (name.equals("int")) {<a name="line.172"></a>
+<span class="sourceLineNo">173</span>      return int.class;<a name="line.173"></a>
+<span class="sourceLineNo">174</span>    } else if (name.equals("long")) {<a name="line.174"></a>
+<span class="sourceLineNo">175</span>      return long.class;<a name="line.175"></a>
+<span class="sourceLineNo">176</span>    } else if (name.equals("float")) {<a name="line.176"></a>
+<span class="sourceLineNo">177</span>      return float.class;<a name="line.177"></a>
+<span class="sourceLineNo">178</span>    } else if (name.equals("double")) {<a name="line.178"></a>
+<span class="sourceLineNo">179</span>      return double.class;<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    } else if (name.equals("void")) {<a name="line.180"></a>
+<span class="sourceLineNo">181</span>      return void.class;<a name="line.181"></a>
+<span class="sourceLineNo">182</span>    } else {<a name="line.182"></a>
+<span class="sourceLineNo">183</span>      return loader.loadClass(name);<a name="line.183"></a>
+<span class="sourceLineNo">184</span>    }<a name="line.184"></a>
+<span class="sourceLineNo">185</span>  }<a name="line.185"></a>
+<span class="sourceLineNo">186</span><a name="line.186"></a>
+<span class="sourceLineNo">187</span>  /**<a name="line.187"></a>
+<span class="sourceLineNo">188</span>   * Get the simple name of the class. This varies from the one in Class, in<a name="line.188"></a>
+<span class="sourceLineNo">189</span>   * that it returns "1" for Classes like java.lang.String$1 In contrast,<a name="line.189"></a>
+<span class="sourceLineNo">190</span>   * String.class.getSimpleName() returns "", which is not unique if<a name="line.190"></a>
+<span class="sourceLineNo">191</span>   * java.lang.String$2 exists, causing all sorts of strange bugs.<a name="line.191"></a>
+<span class="sourceLineNo">192</span>   *<a name="line.192"></a>
+<span class="sourceLineNo">193</span>   * @param name<a name="line.193"></a>
+<span class="sourceLineNo">194</span>   * @return<a name="line.194"></a>
+<span class="sourceLineNo">195</span>   */<a name="line.195"></a>
+<span class="sourceLineNo">196</span>  public static String getSimpleName(Type name) {<a name="line.196"></a>
+<span class="sourceLineNo">197</span>    final Class&lt;?&gt; clazz = getRawClass(name);<a name="line.197"></a>
+<span class="sourceLineNo">198</span>    final String[] nameArray = clazz.getName().split(regexp);<a name="line.198"></a>
+<span class="sourceLineNo">199</span>    final String ret = nameArray[nameArray.length - 1];<a name="line.199"></a>
+<span class="sourceLineNo">200</span>    if (ret.length() == 0) {<a name="line.200"></a>
+<span class="sourceLineNo">201</span>      throw new IllegalArgumentException("Class " + name + " has zero-length simple name.  Can't happen?!?");<a name="line.201"></a>
+<span class="sourceLineNo">202</span>    }<a name="line.202"></a>
+<span class="sourceLineNo">203</span>    return ret;<a name="line.203"></a>
+<span class="sourceLineNo">204</span>  }<a name="line.204"></a>
+<span class="sourceLineNo">205</span><a name="line.205"></a>
+<span class="sourceLineNo">206</span>  /**<a name="line.206"></a>
+<span class="sourceLineNo">207</span>   * Return the full name of the raw type of the provided Type.<a name="line.207"></a>
+<span class="sourceLineNo">208</span>   * &lt;p/&gt;<a name="line.208"></a>
+<span class="sourceLineNo">209</span>   * Examples:<a name="line.209"></a>
+<span class="sourceLineNo">210</span>   * &lt;p/&gt;<a name="line.210"></a>
+<span class="sourceLineNo">211</span>   * java.lang.String.class -&gt; "java.lang.String"<a name="line.211"></a>
+<span class="sourceLineNo">212</span>   * Set&lt;String&gt; -&gt; "java.util.Set"  // such types can occur as constructor arguments, for example<a name="line.212"></a>
+<span class="sourceLineNo">213</span>   *<a name="line.213"></a>
+<span class="sourceLineNo">214</span>   * @param name<a name="line.214"></a>
+<span class="sourceLineNo">215</span>   * @return<a name="line.215"></a>
+<span class="sourceLineNo">216</span>   */<a name="line.216"></a>
+<span class="sourceLineNo">217</span>  public static String getFullName(Type name) {<a name="line.217"></a>
+<span class="sourceLineNo">218</span>    return getRawClass(name).getName();<a name="line.218"></a>
+<span class="sourceLineNo">219</span>  }<a name="line.219"></a>
+<span class="sourceLineNo">220</span><a name="line.220"></a>
+<span class="sourceLineNo">221</span>  /**<a name="line.221"></a>
+<span class="sourceLineNo">222</span>   * Return the full name of the provided field.  This will be globally<a name="line.222"></a>
+<span class="sourceLineNo">223</span>   * unique.  Following Java semantics, the full name will have all the<a name="line.223"></a>
+<span class="sourceLineNo">224</span>   * generic parameters stripped out of it.<a name="line.224"></a>
+<span class="sourceLineNo">225</span>   * &lt;p/&gt;<a name="line.225"></a>
+<span class="sourceLineNo">226</span>   * Example:<a name="line.226"></a>
+<span class="sourceLineNo">227</span>   * &lt;p/&gt;<a name="line.227"></a>
+<span class="sourceLineNo">228</span>   * Set&lt;X&gt; { int size; } -&gt; java.util.Set.size<a name="line.228"></a>
+<span class="sourceLineNo">229</span>   */<a name="line.229"></a>
+<span class="sourceLineNo">230</span>  public static String getFullName(Field f) {<a name="line.230"></a>
+<span class="sourceLineNo">231</span>    return getFullName(f.getDeclaringClass()) + "." + f.getName();<a name="line.231"></a>
+<span class="sourceLineNo">232</span>  }<a name="line.232"></a>
+<span class="sourceLineNo">233</span><a name="line.233"></a>
+<span class="sourceLineNo">234</span>  /**<a name="line.234"></a>
+<span class="sourceLineNo">235</span>   * This method takes a class called clazz that *directly* implements a generic interface or generic class, iface.<a name="line.235"></a>
+<span class="sourceLineNo">236</span>   * Iface should take a single parameter, which this method will return.<a name="line.236"></a>
+<span class="sourceLineNo">237</span>   * &lt;p/&gt;<a name="line.237"></a>
+<span class="sourceLineNo">238</span>   * TODO This is only tested for interfaces, and the type parameters associated with method arguments.<a name="line.238"></a>
+<span class="sourceLineNo">239</span>   * TODO Not sure what we should do in the face of deeply nested generics (eg: Set&lt;Set&lt;String&gt;)<a name="line.239"></a>
+<span class="sourceLineNo">240</span>   * TODO Recurse up the class hierarchy in case there are intermediate interfaces<a name="line.240"></a>
+<span class="sourceLineNo">241</span>   *<a name="line.241"></a>
+<span class="sourceLineNo">242</span>   * @param iface A generic interface; we're looking up it's first (and only) parameter.<a name="line.242"></a>
+<span class="sourceLineNo">243</span>   * @param type  A type that is more specific than clazz, or clazz if no such type is available.<a name="line.243"></a>
+<span class="sourceLineNo">244</span>   * @return The class implemented by the interface, or null(?) if the instantiation was not generic.<a name="line.244"></a>
+<span class="sourceLineNo">245</span>   * @throws IllegalArgumentException if clazz does not directly implement iface.<a name="line.245"></a>
+<span class="sourceLineNo">246</span>   */<a name="line.246"></a>
+<span class="sourceLineNo">247</span>  static public Type getInterfaceTarget(final Class&lt;?&gt; iface, final Type type) throws IllegalArgumentException {<a name="line.247"></a>
+<span class="sourceLineNo">248</span>    if (type instanceof ParameterizedType) {<a name="line.248"></a>
+<span class="sourceLineNo">249</span>      final ParameterizedType pt = (ParameterizedType) type;<a name="line.249"></a>
+<span class="sourceLineNo">250</span>      if (iface.isAssignableFrom((Class&lt;?&gt;) pt.getRawType())) {<a name="line.250"></a>
+<span class="sourceLineNo">251</span>        Type t = pt.getActualTypeArguments()[0];<a name="line.251"></a>
+<span class="sourceLineNo">252</span>        return t;<a name="line.252"></a>
+<span class="sourceLineNo">253</span>      } else {<a name="line.253"></a>
+<span class="sourceLineNo">254</span>        throw new IllegalArgumentException("Parameterized type " + type + " does not extend " + iface);<a name="line.254"></a>
+<span class="sourceLineNo">255</span>      }<a name="line.255"></a>
+<span class="sourceLineNo">256</span>    } else if (type instanceof Class) {<a name="line.256"></a>
+<span class="sourceLineNo">257</span>      final Class&lt;?&gt; clazz = (Class&lt;?&gt;) type;<a name="line.257"></a>
+<span class="sourceLineNo">258</span><a name="line.258"></a>
+<span class="sourceLineNo">259</span>      if (!clazz.equals(type)) {<a name="line.259"></a>
+<span class="sourceLineNo">260</span>        throw new IllegalArgumentException();<a name="line.260"></a>
+<span class="sourceLineNo">261</span>      }<a name="line.261"></a>
+<span class="sourceLineNo">262</span><a name="line.262"></a>
+<span class="sourceLineNo">263</span>      ArrayList&lt;Type&gt; al = new ArrayList&lt;&gt;();<a name="line.263"></a>
+<span class="sourceLineNo">264</span>      al.addAll(Arrays.asList(clazz.getGenericInterfaces()));<a name="line.264"></a>
+<span class="sourceLineNo">265</span>      Type sc = clazz.getGenericSuperclass();<a name="line.265"></a>
+<span class="sourceLineNo">266</span>      if (sc != null) al.add(sc);<a name="line.266"></a>
+<span class="sourceLineNo">267</span><a name="line.267"></a>
+<span class="sourceLineNo">268</span>      final Type[] interfaces = al.toArray(new Type[0]);<a name="line.268"></a>
+<span class="sourceLineNo">269</span><a name="line.269"></a>
+<span class="sourceLineNo">270</span>      for (Type genericNameType : interfaces) {<a name="line.270"></a>
+<span class="sourceLineNo">271</span>        if (genericNameType instanceof ParameterizedType) {<a name="line.271"></a>
+<span class="sourceLineNo">272</span>          ParameterizedType ptype = (ParameterizedType) genericNameType;<a name="line.272"></a>
+<span class="sourceLineNo">273</span>          if (ptype.getRawType().equals(iface)) {<a name="line.273"></a>
+<span class="sourceLineNo">274</span>            Type t = ptype.getActualTypeArguments()[0];<a name="line.274"></a>
+<span class="sourceLineNo">275</span>            return t;<a name="line.275"></a>
+<span class="sourceLineNo">276</span>          }<a name="line.276"></a>
+<span class="sourceLineNo">277</span>        }<a name="line.277"></a>
+<span class="sourceLineNo">278</span>      }<a name="line.278"></a>
+<span class="sourceLineNo">279</span>      throw new IllegalArgumentException(clazz + " does not directly implement " + iface);<a name="line.279"></a>
+<span class="sourceLineNo">280</span>    } else {<a name="line.280"></a>
+<span class="sourceLineNo">281</span>      throw new UnsupportedOperationException("Do not know how to get interface target of " + type);<a name="line.281"></a>
+<span class="sourceLineNo">282</span>    }<a name="line.282"></a>
+<span class="sourceLineNo">283</span>  }<a name="line.283"></a>
+<span class="sourceLineNo">284</span><a name="line.284"></a>
+<span class="sourceLineNo">285</span>  /**<a name="line.285"></a>
+<span class="sourceLineNo">286</span>   * @param clazz<a name="line.286"></a>
+<span class="sourceLineNo">287</span>   * @return T if clazz implements Name&lt;T&gt;, null otherwise<a name="line.287"></a>
+<span class="sourceLineNo">288</span>   * @throws BindException If clazz's definition incorrectly uses Name or @NamedParameter<a name="line.288"></a>
+<span class="sourceLineNo">289</span>   */<a name="line.289"></a>
+<span class="sourceLineNo">290</span>  static public Type getNamedParameterTargetOrNull(Class&lt;?&gt; clazz)<a name="line.290"></a>
+<span class="sourceLineNo">291</span>      throws ClassHierarchyException {<a name="line.291"></a>
+<span class="sourceLineNo">292</span>    Annotation npAnnotation = clazz.getAnnotation(NamedParameter.class);<a name="line.292"></a>
+<span class="sourceLineNo">293</span>    boolean hasSuperClass = (clazz.getSuperclass() != Object.class);<a name="line.293"></a>
+<span class="sourceLineNo">294</span><a name="line.294"></a>
+<span class="sourceLineNo">295</span>    boolean isInjectable = false;<a name="line.295"></a>
+<span class="sourceLineNo">296</span>    boolean hasConstructor = false;<a name="line.296"></a>
+<span class="sourceLineNo">297</span>    // TODO Figure out how to properly differentiate between default and<a name="line.297"></a>
+<span class="sourceLineNo">298</span>    // non-default zero-arg constructors?<a name="line.298"></a>
+<span class="sourceLineNo">299</span>    Constructor&lt;?&gt;[] constructors = clazz.getDeclaredConstructors();<a name="line.299"></a>
+<span class="sourceLineNo">300</span>    if (constructors.length &gt; 1) {<a name="line.300"></a>
+<span class="sourceLineNo">301</span>      hasConstructor = true;<a name="line.301"></a>
+<span class="sourceLineNo">302</span>    }<a name="line.302"></a>
+<span class="sourceLineNo">303</span>    if (constructors.length == 1) {<a name="line.303"></a>
+<span class="sourceLineNo">304</span>      Constructor&lt;?&gt; c = constructors[0];<a name="line.304"></a>
+<span class="sourceLineNo">305</span>      Class&lt;?&gt;[] p = c.getParameterTypes();<a name="line.305"></a>
+<span class="sourceLineNo">306</span>      if (p.length &gt; 1) {<a name="line.306"></a>
+<span class="sourceLineNo">307</span>        // Multiple args. Definitely not implicit.<a name="line.307"></a>
+<span class="sourceLineNo">308</span>        hasConstructor = true;<a name="line.308"></a>
+<span class="sourceLineNo">309</span>      } else if (p.length == 1) {<a name="line.309"></a>
+<span class="sourceLineNo">310</span>        // One arg. Could be an inner class, in which case the compiler<a name="line.310"></a>
+<span class="sourceLineNo">311</span>        // included an implicit one parameter constructor that takes the<a name="line.311"></a>
+<span class="sourceLineNo">312</span>        // enclosing type.<a name="line.312"></a>
+<span class="sourceLineNo">313</span>        if (p[0] != clazz.getEnclosingClass()) {<a name="line.313"></a>
+<span class="sourceLineNo">314</span>          hasConstructor = true;<a name="line.314"></a>
+<span class="sourceLineNo">315</span>        }<a name="line.315"></a>
+<span class="sourceLineNo">316</span>      }<a name="line.316"></a>
+<span class="sourceLineNo">317</span>    }<a name="line.317"></a>
+<span class="sourceLineNo">318</span>    for (Constructor&lt;?&gt; c : constructors) {<a name="line.318"></a>
+<span class="sourceLineNo">319</span>      for (Annotation a : c.getDeclaredAnnotations()) {<a name="line.319"></a>
+<span class="sourceLineNo">320</span>        if (a instanceof Inject) {<a name="line.320"></a>
+<span class="sourceLineNo">321</span>          isInjectable = true;<a name="line.321"></a>
+<span class="sourceLineNo">322</span>        }<a name="line.322"></a>
+<span class="sourceLineNo">323</span>      }<a name="line.323"></a>
+<span class="sourceLineNo">324</span>    }<a name="line.324"></a>
+<span class="sourceLineNo">325</span><a name="line.325"></a>
+<span class="sourceLineNo">326</span>    Class&lt;?&gt;[] allInterfaces = clazz.getInterfaces();<a name="line.326"></a>
+<span class="sourceLineNo">327</span><a name="line.327"></a>
+<span class="sourceLineNo">328</span>    boolean hasMultipleInterfaces = (allInterfaces.length &gt; 1);<a name="line.328"></a>
+<span class="sourceLineNo">329</span>    boolean implementsName;<a name="line.329"></a>
+<span class="sourceLineNo">330</span>    Type parameterClass = null;<a name="line.330"></a>
+<span class="sourceLineNo">331</span>    try {<a name="line.331"></a>
+<span class="sourceLineNo">332</span>      parameterClass = getInterfaceTarget(Name.class, clazz);<a name="line.332"></a>
+<span class="sourceLineNo">333</span>      implementsName = true;<a name="line.333"></a>
+<span class="sourceLineNo">334</span>    } catch (IllegalArgumentException e) {<a name="line.334"></a>
+<span class="sourceLineNo">335</span>      implementsName = false;<a name="line.335"></a>
+<span class="sourceLineNo">336</span>    }<a name="line.336"></a>
+<span class="sourceLineNo">337</span><a name="line.337"></a>
+<span class="sourceLineNo">338</span>    if (npAnnotation == null) {<a name="line.338"></a>
+<span class="sourceLineNo">339</span>      if (implementsName) {<a name="line.339"></a>
+<span class="sourceLineNo">340</span>        throw new ClassHierarchyException("Named parameter " + getFullName(clazz)<a name="line.340"></a>
+<span class="sourceLineNo">341</span>            + " is missing its @NamedParameter annotation.");<a name="line.341"></a>
+<span class="sourceLineNo">342</span>      } else {<a name="line.342"></a>
+<span class="sourceLineNo">343</span>        return null;<a name="line.343"></a>
+<span class="sourceLineNo">344</span>      }<a name="line.344"></a>
+<span class="sourceLineNo">345</span>    } else {<a name="line.345"></a>
+<span class="sourceLineNo">346</span>      if (!implementsName) {<a name="line.346"></a>
+<span class="sourceLineNo">347</span>        throw new ClassHierarchyException("Found illegal @NamedParameter " + getFullName(clazz)<a name="line.347"></a>
+<span class="sourceLineNo">348</span>            + " does not implement Name&lt;?&gt;");<a name="line.348"></a>
+<span class="sourceLineNo">349</span>      }<a name="line.349"></a>
+<span class="sourceLineNo">350</span>      if (hasSuperClass) {<a name="line.350"></a>
+<span class="sourceLineNo">351</span>        throw new ClassHierarchyException("Named parameter " + getFullName(clazz)<a name="line.351"></a>
+<span class="sourceLineNo">352</span>            + " has a superclass other than Object.");<a name="line.352"></a>
+<span class="sourceLineNo">353</span>      }<a name="line.353"></a>
+<span class="sourceLineNo">354</span>      if (hasConstructor || isInjectable) {<a name="line.354"></a>
+<span class="sourceLineNo">355</span>        throw new ClassHierarchyException("Named parameter " + getFullName(clazz) + " has "<a name="line.355"></a>
+<span class="sourceLineNo">356</span>            + (isInjectable ? "an injectable" : "a") + " constructor. "<a name="line.356"></a>
+<span class="sourceLineNo">357</span>            + " Named parameters must not declare any constructors.");<a name="line.357"></a>
+<span class="sourceLineNo">358</span>      }<a name="line.358"></a>
+<span class="sourceLineNo">359</span>      if (hasMultipleInterfaces) {<a name="line.359"></a>
+<span class="sourceLineNo">360</span>        throw new ClassHierarchyException("Named parameter " + getFullName(clazz) + " implements "<a name="line.360"></a>
+<span class="sourceLineNo">361</span>            + "multiple interfaces.  It is only allowed to implement Name&lt;T&gt;");<a name="line.361"></a>
+<span class="sourceLineNo">362</span>      }<a name="line.362"></a>
+<span class="sourceLineNo">363</span>      if (parameterClass == null) {<a name="line.363"></a>
+<span class="sourceLineNo">364</span>        throw new ClassHierarchyException(<a name="line.364"></a>
+<span class="sourceLineNo">365</span>            "Missing type parameter in named parameter declaration.  " + getFullName(clazz)<a name="line.365"></a>
+<span class="sourceLineNo">366</span>                + " implements raw type Name, but must implement"<a name="line.366"></a>
+<span class="sourceLineNo">367</span>                + " generic type Name&lt;T&gt;.");<a name="line.367"></a>
+<span class="sourceLineNo">368</span>      }<a name="line.368"></a>
+<span class="sourceLineNo">369</span>      return parameterClass;<a name="line.369"></a>
+<span class="sourceLineNo">370</span>    }<a name="line.370"></a>
+<span class="sourceLineNo">371</span>  }<a name="line.371"></a>
+<span class="sourceLineNo">372</span><a name="line.372"></a>
+<span class="sourceLineNo">373</span>  /**<a name="line.373"></a>
+<span class="sourceLineNo">374</span>   * Coerce a Type into a Class.  This strips out any generic paramters, and<a name="line.374"></a>
+<span class="sourceLineNo">375</span>   * resolves wildcards and free parameters to Object.<a name="line.375"></a>
+<span class="sourceLineNo">376</span>   * &lt;p/&gt;<a name="line.376"></a>
+<span class="sourceLineNo">377</span>   * Examples:<a name="line.377"></a>
+<span class="sourceLineNo">378</span>   * java.util.Set&lt;String&gt; -&gt; java.util.Set<a name="line.378"></a>
+<span class="sourceLineNo">379</span>   * ? extends T -&gt; Object<a name="line.379"></a>
+<span class="sourceLineNo">380</span>   * T -&gt; Object<a name="line.380"></a>
+<span class="sourceLineNo">381</span>   * ? -&gt; Object<a name="line.381"></a>
+<span class="sourceLineNo">382</span>   */<a name="line.382"></a>
+<span class="sourceLineNo">383</span>  public static Class&lt;?&gt; getRawClass(Type clazz) {<a name="line.383"></a>
+<span class="sourceLineNo">384</span>    if (clazz instanceof Class) {<a name="line.384"></a>
+<span class="sourceLineNo">385</span>      return (Class&lt;?&gt;) clazz;<a name="line.385"></a>
+<span class="sourceLineNo">386</span>    } else if (clazz instanceof ParameterizedType) {<a name="line.386"></a>
+<span class="sourceLineNo">387</span>      return (Class&lt;?&gt;) ((ParameterizedType) clazz).getRawType();<a name="line.387"></a>
+<span class="sourceLineNo">388</span>    } else if (clazz instanceof WildcardType) {<a name="line.388"></a>
+<span class="sourceLineNo">389</span>      return Object.class; // XXX not really correct, but close enough?<a name="line.389"></a>
+<span class="sourceLineNo">390</span>    } else if (clazz instanceof TypeVariable) {<a name="line.390"></a>
+<span class="sourceLineNo">391</span>      return Object.class; // XXX not really correct, but close enough?<a name="line.391"></a>
+<span class="sourceLineNo">392</span>    } else {<a name="line.392"></a>
+<span class="sourceLineNo">393</span>      System.err.println("Can't getRawClass for " + clazz + " of unknown type " + clazz.getClass());<a name="line.393"></a>
+<span class="sourceLineNo">394</span>      throw new IllegalArgumentException("Can't getRawClass for " + clazz + " of unknown type " + clazz.getClass());<a name="line.394"></a>
+<span class="sourceLineNo">395</span>    }<a name="line.395"></a>
+<span class="sourceLineNo">396</span>  }<a name="line.396"></a>
+<span class="sourceLineNo">397</span>}<a name="line.397"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>
