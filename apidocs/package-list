@@ -159,4 +159,3 @@ org.apache.reef.wake.time.event
 org.apache.reef.wake.time.runtime
 org.apache.reef.wake.time.runtime.event
 org.apache.reef.webserver
-src
