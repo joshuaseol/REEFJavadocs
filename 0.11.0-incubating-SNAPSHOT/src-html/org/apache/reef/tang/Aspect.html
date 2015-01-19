@@ -1,0 +1,146 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>/**<a name="line.1"></a>
+<span class="sourceLineNo">002</span> * Licensed to the Apache Software Foundation (ASF) under one<a name="line.2"></a>
+<span class="sourceLineNo">003</span> * or more contributor license agreements.  See the NOTICE file<a name="line.3"></a>
+<span class="sourceLineNo">004</span> * distributed with this work for additional information<a name="line.4"></a>
+<span class="sourceLineNo">005</span> * regarding copyright ownership.  The ASF licenses this file<a name="line.5"></a>
+<span class="sourceLineNo">006</span> * to you under the Apache License, Version 2.0 (the<a name="line.6"></a>
+<span class="sourceLineNo">007</span> * "License"); you may not use this file except in compliance<a name="line.7"></a>
+<span class="sourceLineNo">008</span> * with the License.  You may obtain a copy of the License at<a name="line.8"></a>
+<span class="sourceLineNo">009</span> *<a name="line.9"></a>
+<span class="sourceLineNo">010</span> *   http://www.apache.org/licenses/LICENSE-2.0<a name="line.10"></a>
+<span class="sourceLineNo">011</span> *<a name="line.11"></a>
+<span class="sourceLineNo">012</span> * Unless required by applicable law or agreed to in writing,<a name="line.12"></a>
+<span class="sourceLineNo">013</span> * software distributed under the License is distributed on an<a name="line.13"></a>
+<span class="sourceLineNo">014</span> * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY<a name="line.14"></a>
+<span class="sourceLineNo">015</span> * KIND, either express or implied.  See the License for the<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * specific language governing permissions and limitations<a name="line.16"></a>
+<span class="sourceLineNo">017</span> * under the License.<a name="line.17"></a>
+<span class="sourceLineNo">018</span> */<a name="line.18"></a>
+<span class="sourceLineNo">019</span>package org.apache.reef.tang;<a name="line.19"></a>
+<span class="sourceLineNo">020</span><a name="line.20"></a>
+<span class="sourceLineNo">021</span>import org.apache.reef.tang.types.ConstructorDef;<a name="line.21"></a>
+<span class="sourceLineNo">022</span><a name="line.22"></a>
+<span class="sourceLineNo">023</span>import java.lang.reflect.Constructor;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>import java.lang.reflect.InvocationTargetException;<a name="line.24"></a>
+<span class="sourceLineNo">025</span><a name="line.25"></a>
+<span class="sourceLineNo">026</span>/**<a name="line.26"></a>
+<span class="sourceLineNo">027</span> * A simple interface that allows external code to interpose on Tang object<a name="line.27"></a>
+<span class="sourceLineNo">028</span> * injections.  This can be used to implement simplistic aspect oriented<a name="line.28"></a>
+<span class="sourceLineNo">029</span> * design patterns by interposing wrapper objects at injection time.  It<a name="line.29"></a>
+<span class="sourceLineNo">030</span> * can also be used for more mundane purposes, such as tracking the<a name="line.30"></a>
+<span class="sourceLineNo">031</span> * relationship between the objects that are instantiated at runtime.<a name="line.31"></a>
+<span class="sourceLineNo">032</span> * &lt;p/&gt;<a name="line.32"></a>
+<span class="sourceLineNo">033</span> * The Wake project contains a full-featured implementation of this API that<a name="line.33"></a>
+<span class="sourceLineNo">034</span> * may serve as a useful example.<a name="line.34"></a>
+<span class="sourceLineNo">035</span> */<a name="line.35"></a>
+<span class="sourceLineNo">036</span>public interface Aspect {<a name="line.36"></a>
+<span class="sourceLineNo">037</span>  /**<a name="line.37"></a>
+<span class="sourceLineNo">038</span>   * Inject an object of type T.<a name="line.38"></a>
+<span class="sourceLineNo">039</span>   * &lt;p/&gt;<a name="line.39"></a>
+<span class="sourceLineNo">040</span>   * Note that it is never OK to return an instance of ExternalConstructor.<a name="line.40"></a>
+<span class="sourceLineNo">041</span>   * Typical implementations check to see if they are about to return an<a name="line.41"></a>
+<span class="sourceLineNo">042</span>   * instance of ExternalConstructor.  If so, they return ret.newInstance()<a name="line.42"></a>
+<span class="sourceLineNo">043</span>   * instead.<a name="line.43"></a>
+<span class="sourceLineNo">044</span>   *<a name="line.44"></a>
+<span class="sourceLineNo">045</span>   * @param def         information about the constructor to be invoked.  This is<a name="line.45"></a>
+<span class="sourceLineNo">046</span>   *                    mostly useful because it contains references to any relevant named<a name="line.46"></a>
+<span class="sourceLineNo">047</span>   *                    parameters, and to the class to be injected.<a name="line.47"></a>
+<span class="sourceLineNo">048</span>   * @param constructor The java constructor to be injected.  Tang automatically<a name="line.48"></a>
+<span class="sourceLineNo">049</span>   *                    chooses the appropriate constructor and ensures that we have permission<a name="line.49"></a>
+<span class="sourceLineNo">050</span>   *                    to invoke it.<a name="line.50"></a>
+<span class="sourceLineNo">051</span>   * @param args        The parameters to be passed into constructor.newInstance(), in the correct order.<a name="line.51"></a>
+<span class="sourceLineNo">052</span>   * @return A new instance of T.<a name="line.52"></a>
+<span class="sourceLineNo">053</span>   * Note, it is inject()'s responsibility to call &lt;tt&gt;ret.getInstance() if ret instanceof ExternalConstructor&lt;/tt&gt;.<a name="line.53"></a>
+<span class="sourceLineNo">054</span>   * @throws A number of exceptions which are passed-through from the wrapped call to newInstance().<a name="line.54"></a>
+<span class="sourceLineNo">055</span>   */<a name="line.55"></a>
+<span class="sourceLineNo">056</span>  &lt;T&gt; T inject(ConstructorDef&lt;T&gt; def, Constructor&lt;T&gt; constructor, Object[] args) throws InvocationTargetException, IllegalAccessException, IllegalArgumentException, InstantiationException;<a name="line.56"></a>
+<span class="sourceLineNo">057</span><a name="line.57"></a>
+<span class="sourceLineNo">058</span>  /**<a name="line.58"></a>
+<span class="sourceLineNo">059</span>   * TANG calls this the first time get() is called on an injection future.  This informs the aspect of<a name="line.59"></a>
+<span class="sourceLineNo">060</span>   * the relationship between InjectionFutures (that were already passed into inject()) and the instantiated<a name="line.60"></a>
+<span class="sourceLineNo">061</span>   * object.<a name="line.61"></a>
+<span class="sourceLineNo">062</span>   *<a name="line.62"></a>
+<span class="sourceLineNo">063</span>   * @param f An InjectionFuture that was passed to the args[] array of inject at some point in the past.<a name="line.63"></a>
+<span class="sourceLineNo">064</span>   * @param t An object instance that was returned by inject().<a name="line.64"></a>
+<span class="sourceLineNo">065</span>   */<a name="line.65"></a>
+<span class="sourceLineNo">066</span>  &lt;T&gt; void injectionFutureInstantiated(InjectionFuture&lt;T&gt; f, T t);<a name="line.66"></a>
+<span class="sourceLineNo">067</span><a name="line.67"></a>
+<span class="sourceLineNo">068</span>  /**<a name="line.68"></a>
+<span class="sourceLineNo">069</span>   * This method creates a child aspect, and returns it.  This allows aspects to track information about<a name="line.69"></a>
+<span class="sourceLineNo">070</span>   * Tang injection scopes.  If such information is not needed, it is legal for Aspect implementations to<a name="line.70"></a>
+<span class="sourceLineNo">071</span>   * return "this".<a name="line.71"></a>
+<span class="sourceLineNo">072</span>   */<a name="line.72"></a>
+<span class="sourceLineNo">073</span>  Aspect createChildAspect();<a name="line.73"></a>
+<span class="sourceLineNo">074</span>}<a name="line.74"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

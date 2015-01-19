@@ -1,0 +1,457 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>/**<a name="line.1"></a>
+<span class="sourceLineNo">002</span> * Licensed to the Apache Software Foundation (ASF) under one<a name="line.2"></a>
+<span class="sourceLineNo">003</span> * or more contributor license agreements.  See the NOTICE file<a name="line.3"></a>
+<span class="sourceLineNo">004</span> * distributed with this work for additional information<a name="line.4"></a>
+<span class="sourceLineNo">005</span> * regarding copyright ownership.  The ASF licenses this file<a name="line.5"></a>
+<span class="sourceLineNo">006</span> * to you under the Apache License, Version 2.0 (the<a name="line.6"></a>
+<span class="sourceLineNo">007</span> * "License"); you may not use this file except in compliance<a name="line.7"></a>
+<span class="sourceLineNo">008</span> * with the License.  You may obtain a copy of the License at<a name="line.8"></a>
+<span class="sourceLineNo">009</span> *<a name="line.9"></a>
+<span class="sourceLineNo">010</span> *   http://www.apache.org/licenses/LICENSE-2.0<a name="line.10"></a>
+<span class="sourceLineNo">011</span> *<a name="line.11"></a>
+<span class="sourceLineNo">012</span> * Unless required by applicable law or agreed to in writing,<a name="line.12"></a>
+<span class="sourceLineNo">013</span> * software distributed under the License is distributed on an<a name="line.13"></a>
+<span class="sourceLineNo">014</span> * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY<a name="line.14"></a>
+<span class="sourceLineNo">015</span> * KIND, either express or implied.  See the License for the<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * specific language governing permissions and limitations<a name="line.16"></a>
+<span class="sourceLineNo">017</span> * under the License.<a name="line.17"></a>
+<span class="sourceLineNo">018</span> */<a name="line.18"></a>
+<span class="sourceLineNo">019</span>package org.apache.reef.tang.formats;<a name="line.19"></a>
+<span class="sourceLineNo">020</span><a name="line.20"></a>
+<span class="sourceLineNo">021</span>import org.apache.reef.tang.ExternalConstructor;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import org.apache.reef.tang.JavaConfigurationBuilder;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import org.apache.reef.tang.Tang;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>import org.apache.reef.tang.annotations.Name;<a name="line.24"></a>
+<span class="sourceLineNo">025</span>import org.apache.reef.tang.exceptions.BindException;<a name="line.25"></a>
+<span class="sourceLineNo">026</span>import org.apache.reef.tang.exceptions.ClassHierarchyException;<a name="line.26"></a>
+<span class="sourceLineNo">027</span>import org.apache.reef.tang.exceptions.NameResolutionException;<a name="line.27"></a>
+<span class="sourceLineNo">028</span>import org.apache.reef.tang.util.MonotonicHashMap;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>import org.apache.reef.tang.util.MonotonicHashSet;<a name="line.29"></a>
+<span class="sourceLineNo">030</span>import org.apache.reef.tang.util.ReflectionUtilities;<a name="line.30"></a>
+<span class="sourceLineNo">031</span><a name="line.31"></a>
+<span class="sourceLineNo">032</span>import java.lang.reflect.Field;<a name="line.32"></a>
+<span class="sourceLineNo">033</span>import java.lang.reflect.Modifier;<a name="line.33"></a>
+<span class="sourceLineNo">034</span>import java.util.List;<a name="line.34"></a>
+<span class="sourceLineNo">035</span>import java.util.Map;<a name="line.35"></a>
+<span class="sourceLineNo">036</span>import java.util.Set;<a name="line.36"></a>
+<span class="sourceLineNo">037</span><a name="line.37"></a>
+<span class="sourceLineNo">038</span>public abstract class ConfigurationModuleBuilder {<a name="line.38"></a>
+<span class="sourceLineNo">039</span><a name="line.39"></a>
+<span class="sourceLineNo">040</span>  private final static Set&lt;Class&lt;?&gt;&gt; paramBlacklist = new MonotonicHashSet&lt;Class&lt;?&gt;&gt;(<a name="line.40"></a>
+<span class="sourceLineNo">041</span>      Param.class, Impl.class);<a name="line.41"></a>
+<span class="sourceLineNo">042</span>  private final static Set&lt;Class&lt;?&gt;&gt; paramTypes = new MonotonicHashSet&lt;Class&lt;?&gt;&gt;(<a name="line.42"></a>
+<span class="sourceLineNo">043</span>      RequiredImpl.class, OptionalImpl.class, RequiredParameter.class,<a name="line.43"></a>
+<span class="sourceLineNo">044</span>      OptionalParameter.class);<a name="line.44"></a>
+<span class="sourceLineNo">045</span>  final JavaConfigurationBuilder b = Tang.Factory.getTang()<a name="line.45"></a>
+<span class="sourceLineNo">046</span>      .newConfigurationBuilder();<a name="line.46"></a>
+<span class="sourceLineNo">047</span>  // Sets of things that have been declared<a name="line.47"></a>
+<span class="sourceLineNo">048</span>  final Set&lt;Field&gt; reqDecl = new MonotonicHashSet&lt;&gt;();<a name="line.48"></a>
+<span class="sourceLineNo">049</span>  final Set&lt;Object&gt; setOpts = new MonotonicHashSet&lt;&gt;();<a name="line.49"></a>
+<span class="sourceLineNo">050</span>  // Maps from field instance variables to the fields that they<a name="line.50"></a>
+<span class="sourceLineNo">051</span>  // are assigned to. These better be unique!<a name="line.51"></a>
+<span class="sourceLineNo">052</span>  final Map&lt;Object, Field&gt; map = new MonotonicHashMap&lt;&gt;();<a name="line.52"></a>
+<span class="sourceLineNo">053</span>  final Map&lt;Class&lt;?&gt;, Impl&lt;?&gt;&gt; freeImpls = new MonotonicHashMap&lt;&gt;();<a name="line.53"></a>
+<span class="sourceLineNo">054</span>  final Map&lt;Class&lt;? extends Name&lt;?&gt;&gt;, Param&lt;?&gt;&gt; freeParams = new MonotonicHashMap&lt;&gt;();<a name="line.54"></a>
+<span class="sourceLineNo">055</span>  private final Set&lt;Field&gt; optDecl = new MonotonicHashSet&lt;&gt;();<a name="line.55"></a>
+<span class="sourceLineNo">056</span>  // Set of things that have been used in a bind. These must be equal<a name="line.56"></a>
+<span class="sourceLineNo">057</span>  // to the decl counterparts before build() is called.<a name="line.57"></a>
+<span class="sourceLineNo">058</span>  private final Set&lt;Field&gt; reqUsed = new MonotonicHashSet&lt;&gt;();<a name="line.58"></a>
+<span class="sourceLineNo">059</span>  private final Set&lt;Field&gt; optUsed = new MonotonicHashSet&lt;&gt;();<a name="line.59"></a>
+<span class="sourceLineNo">060</span>  private final Map&lt;Class&lt;?&gt;, String&gt; lateBindClazz = new MonotonicHashMap&lt;&gt;();<a name="line.60"></a>
+<span class="sourceLineNo">061</span><a name="line.61"></a>
+<span class="sourceLineNo">062</span>  protected ConfigurationModuleBuilder() {<a name="line.62"></a>
+<span class="sourceLineNo">063</span>    for (Field f : getClass().getDeclaredFields()) {<a name="line.63"></a>
+<span class="sourceLineNo">064</span>      Class&lt;?&gt; t = f.getType();<a name="line.64"></a>
+<span class="sourceLineNo">065</span>      if (paramBlacklist.contains(t)) {<a name="line.65"></a>
+<span class="sourceLineNo">066</span>        throw new ClassHierarchyException(<a name="line.66"></a>
+<span class="sourceLineNo">067</span>            "Found a field of type " + t + " which should be a Required/Optional Parameter/Implementation instead"<a name="line.67"></a>
+<span class="sourceLineNo">068</span>        );<a name="line.68"></a>
+<span class="sourceLineNo">069</span>      }<a name="line.69"></a>
+<span class="sourceLineNo">070</span>      if (paramTypes.contains(t)) {<a name="line.70"></a>
+<span class="sourceLineNo">071</span>        if (!Modifier.isPublic(f.getModifiers())) {<a name="line.71"></a>
+<span class="sourceLineNo">072</span>          throw new ClassHierarchyException(<a name="line.72"></a>
+<span class="sourceLineNo">073</span>              "Found a non-public configuration option in " + getClass() + ": "<a name="line.73"></a>
+<span class="sourceLineNo">074</span>                  + f);<a name="line.74"></a>
+<span class="sourceLineNo">075</span>        }<a name="line.75"></a>
+<span class="sourceLineNo">076</span>        if (!Modifier.isStatic(f.getModifiers())) {<a name="line.76"></a>
+<span class="sourceLineNo">077</span>          throw new ClassHierarchyException(<a name="line.77"></a>
+<span class="sourceLineNo">078</span>              "Found a non-static configuration option in " + getClass() + ": "<a name="line.78"></a>
+<span class="sourceLineNo">079</span>                  + f);<a name="line.79"></a>
+<span class="sourceLineNo">080</span>        }<a name="line.80"></a>
+<span class="sourceLineNo">081</span>        if (!Modifier.isFinal(f.getModifiers())) {<a name="line.81"></a>
+<span class="sourceLineNo">082</span>          throw new ClassHierarchyException(<a name="line.82"></a>
+<span class="sourceLineNo">083</span>              "Found a non-final configuration option in " + getClass() + ": "<a name="line.83"></a>
+<span class="sourceLineNo">084</span>                  + f);<a name="line.84"></a>
+<span class="sourceLineNo">085</span>        }<a name="line.85"></a>
+<span class="sourceLineNo">086</span>        final Object o;<a name="line.86"></a>
+<span class="sourceLineNo">087</span>        try {<a name="line.87"></a>
+<span class="sourceLineNo">088</span>          o = f.get(null);<a name="line.88"></a>
+<span class="sourceLineNo">089</span>        } catch (IllegalArgumentException | IllegalAccessException e) {<a name="line.89"></a>
+<span class="sourceLineNo">090</span>          throw new ClassHierarchyException(<a name="line.90"></a>
+<span class="sourceLineNo">091</span>              "Could not look up field instance in " + getClass() + " field: "<a name="line.91"></a>
+<span class="sourceLineNo">092</span>                  + f, e);<a name="line.92"></a>
+<span class="sourceLineNo">093</span>        }<a name="line.93"></a>
+<span class="sourceLineNo">094</span>        if (map.containsKey(o)) {<a name="line.94"></a>
+<span class="sourceLineNo">095</span>          throw new ClassHierarchyException(<a name="line.95"></a>
+<span class="sourceLineNo">096</span>              "Detected aliased instances in class " + getClass()<a name="line.96"></a>
+<span class="sourceLineNo">097</span>                  + " for fields " + map.get(o) + " and " + f);<a name="line.97"></a>
+<span class="sourceLineNo">098</span>        }<a name="line.98"></a>
+<span class="sourceLineNo">099</span>        if (t == RequiredImpl.class || t == RequiredParameter.class) {<a name="line.99"></a>
+<span class="sourceLineNo">100</span>          reqDecl.add(f);<a name="line.100"></a>
+<span class="sourceLineNo">101</span>        } else {<a name="line.101"></a>
+<span class="sourceLineNo">102</span>          optDecl.add(f);<a name="line.102"></a>
+<span class="sourceLineNo">103</span>        }<a name="line.103"></a>
+<span class="sourceLineNo">104</span>        map.put(o, f);<a name="line.104"></a>
+<span class="sourceLineNo">105</span>      }<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    }<a name="line.106"></a>
+<span class="sourceLineNo">107</span>  }<a name="line.107"></a>
+<span class="sourceLineNo">108</span><a name="line.108"></a>
+<span class="sourceLineNo">109</span>  private ConfigurationModuleBuilder(ConfigurationModuleBuilder c) {<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    try {<a name="line.110"></a>
+<span class="sourceLineNo">111</span>      b.addConfiguration(c.b.build());<a name="line.111"></a>
+<span class="sourceLineNo">112</span>    } catch (BindException e) {<a name="line.112"></a>
+<span class="sourceLineNo">113</span>      throw new ClassHierarchyException(e);<a name="line.113"></a>
+<span class="sourceLineNo">114</span>    }<a name="line.114"></a>
+<span class="sourceLineNo">115</span>    reqDecl.addAll(c.reqDecl);<a name="line.115"></a>
+<span class="sourceLineNo">116</span>    optDecl.addAll(c.optDecl);<a name="line.116"></a>
+<span class="sourceLineNo">117</span>    reqUsed.addAll(c.reqUsed);<a name="line.117"></a>
+<span class="sourceLineNo">118</span>    optUsed.addAll(c.optUsed);<a name="line.118"></a>
+<span class="sourceLineNo">119</span>    setOpts.addAll(c.setOpts);<a name="line.119"></a>
+<span class="sourceLineNo">120</span>    map.putAll(c.map);<a name="line.120"></a>
+<span class="sourceLineNo">121</span>    freeImpls.putAll(c.freeImpls);<a name="line.121"></a>
+<span class="sourceLineNo">122</span>    freeParams.putAll(c.freeParams);<a name="line.122"></a>
+<span class="sourceLineNo">123</span>    lateBindClazz.putAll(c.lateBindClazz);<a name="line.123"></a>
+<span class="sourceLineNo">124</span><a name="line.124"></a>
+<span class="sourceLineNo">125</span>  }<a name="line.125"></a>
+<span class="sourceLineNo">126</span><a name="line.126"></a>
+<span class="sourceLineNo">127</span>  /**<a name="line.127"></a>
+<span class="sourceLineNo">128</span>   * TODO: It would be nice if this incorporated d by reference so that static analysis / documentation tools<a name="line.128"></a>
+<span class="sourceLineNo">129</span>   * could document the dependency between c and d.<a name="line.129"></a>
+<span class="sourceLineNo">130</span>   */<a name="line.130"></a>
+<span class="sourceLineNo">131</span>  public final ConfigurationModuleBuilder merge(ConfigurationModule d) {<a name="line.131"></a>
+<span class="sourceLineNo">132</span>    if (d == null) {<a name="line.132"></a>
+<span class="sourceLineNo">133</span>      throw new NullPointerException("If merge() was passed a static final field that is initialized to non-null, then this is almost certainly caused by a circular class dependency.");<a name="line.133"></a>
+<span class="sourceLineNo">134</span>    }<a name="line.134"></a>
+<span class="sourceLineNo">135</span>    try {<a name="line.135"></a>
+<span class="sourceLineNo">136</span>      d.assertStaticClean();<a name="line.136"></a>
+<span class="sourceLineNo">137</span>    } catch (ClassHierarchyException e) {<a name="line.137"></a>
+<span class="sourceLineNo">138</span>      throw new ClassHierarchyException(ReflectionUtilities.getFullName(getClass()) + ": detected attempt to merge with ConfigurationModule that has had set() called on it", e);<a name="line.138"></a>
+<span class="sourceLineNo">139</span>    }<a name="line.139"></a>
+<span class="sourceLineNo">140</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.140"></a>
+<span class="sourceLineNo">141</span>    try {<a name="line.141"></a>
+<span class="sourceLineNo">142</span>      c.b.addConfiguration(d.builder.b.build());<a name="line.142"></a>
+<span class="sourceLineNo">143</span>    } catch (BindException e) {<a name="line.143"></a>
+<span class="sourceLineNo">144</span>      throw new ClassHierarchyException(e);<a name="line.144"></a>
+<span class="sourceLineNo">145</span>    }<a name="line.145"></a>
+<span class="sourceLineNo">146</span>    c.reqDecl.addAll(d.builder.reqDecl);<a name="line.146"></a>
+<span class="sourceLineNo">147</span>    c.optDecl.addAll(d.builder.optDecl);<a name="line.147"></a>
+<span class="sourceLineNo">148</span>    c.reqUsed.addAll(d.builder.reqUsed);<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    c.optUsed.addAll(d.builder.optUsed);<a name="line.149"></a>
+<span class="sourceLineNo">150</span>    c.setOpts.addAll(d.builder.setOpts);<a name="line.150"></a>
+<span class="sourceLineNo">151</span>    c.map.putAll(d.builder.map);<a name="line.151"></a>
+<span class="sourceLineNo">152</span>    c.freeImpls.putAll(d.builder.freeImpls);<a name="line.152"></a>
+<span class="sourceLineNo">153</span>    c.freeParams.putAll(d.builder.freeParams);<a name="line.153"></a>
+<span class="sourceLineNo">154</span>    c.lateBindClazz.putAll(d.builder.lateBindClazz);<a name="line.154"></a>
+<span class="sourceLineNo">155</span><a name="line.155"></a>
+<span class="sourceLineNo">156</span>    return c;<a name="line.156"></a>
+<span class="sourceLineNo">157</span>  }<a name="line.157"></a>
+<span class="sourceLineNo">158</span><a name="line.158"></a>
+<span class="sourceLineNo">159</span>  public final &lt;T&gt; ConfigurationModuleBuilder bind(Class&lt;?&gt; iface, Impl&lt;?&gt; opt) {<a name="line.159"></a>
+<span class="sourceLineNo">160</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.160"></a>
+<span class="sourceLineNo">161</span>    c.processUse(opt);<a name="line.161"></a>
+<span class="sourceLineNo">162</span>    c.freeImpls.put(iface, opt);<a name="line.162"></a>
+<span class="sourceLineNo">163</span>    return c;<a name="line.163"></a>
+<span class="sourceLineNo">164</span>  }<a name="line.164"></a>
+<span class="sourceLineNo">165</span><a name="line.165"></a>
+<span class="sourceLineNo">166</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindSetEntry(Class&lt;? extends Name&lt;Set&lt;T&gt;&gt;&gt; iface, String impl) {<a name="line.166"></a>
+<span class="sourceLineNo">167</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.167"></a>
+<span class="sourceLineNo">168</span>    try {<a name="line.168"></a>
+<span class="sourceLineNo">169</span>      c.b.bindSetEntry(iface, impl);<a name="line.169"></a>
+<span class="sourceLineNo">170</span>    } catch (BindException e) {<a name="line.170"></a>
+<span class="sourceLineNo">171</span>      throw new ClassHierarchyException(e);<a name="line.171"></a>
+<span class="sourceLineNo">172</span>    }<a name="line.172"></a>
+<span class="sourceLineNo">173</span>    return c;<a name="line.173"></a>
+<span class="sourceLineNo">174</span>  }<a name="line.174"></a>
+<span class="sourceLineNo">175</span><a name="line.175"></a>
+<span class="sourceLineNo">176</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindSetEntry(Class&lt;? extends Name&lt;Set&lt;T&gt;&gt;&gt; iface, Class&lt;? extends T&gt; impl) {<a name="line.176"></a>
+<span class="sourceLineNo">177</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.177"></a>
+<span class="sourceLineNo">178</span>    try {<a name="line.178"></a>
+<span class="sourceLineNo">179</span>      c.b.bindSetEntry(iface, impl);<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    } catch (BindException e) {<a name="line.180"></a>
+<span class="sourceLineNo">181</span>      throw new ClassHierarchyException(e);<a name="line.181"></a>
+<span class="sourceLineNo">182</span>    }<a name="line.182"></a>
+<span class="sourceLineNo">183</span>    return c;<a name="line.183"></a>
+<span class="sourceLineNo">184</span>  }<a name="line.184"></a>
+<span class="sourceLineNo">185</span><a name="line.185"></a>
+<span class="sourceLineNo">186</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindSetEntry(Class&lt;? extends Name&lt;Set&lt;T&gt;&gt;&gt; iface, Impl&lt;? extends T&gt; opt) {<a name="line.186"></a>
+<span class="sourceLineNo">187</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.187"></a>
+<span class="sourceLineNo">188</span>    c.processUse(opt);<a name="line.188"></a>
+<span class="sourceLineNo">189</span>    c.freeImpls.put(iface, opt);<a name="line.189"></a>
+<span class="sourceLineNo">190</span>    if (!setOpts.contains(opt)) {<a name="line.190"></a>
+<span class="sourceLineNo">191</span>      c.setOpts.add(opt);<a name="line.191"></a>
+<span class="sourceLineNo">192</span>    }<a name="line.192"></a>
+<span class="sourceLineNo">193</span>    return c;<a name="line.193"></a>
+<span class="sourceLineNo">194</span>  }<a name="line.194"></a>
+<span class="sourceLineNo">195</span><a name="line.195"></a>
+<span class="sourceLineNo">196</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindSetEntry(Class&lt;? extends Name&lt;Set&lt;T&gt;&gt;&gt; iface, Param&lt;? extends T&gt; opt) {<a name="line.196"></a>
+<span class="sourceLineNo">197</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.197"></a>
+<span class="sourceLineNo">198</span>    c.processUse(opt);<a name="line.198"></a>
+<span class="sourceLineNo">199</span>    c.freeParams.put(iface, opt);<a name="line.199"></a>
+<span class="sourceLineNo">200</span>    if (!setOpts.contains(opt)) {<a name="line.200"></a>
+<span class="sourceLineNo">201</span>      c.setOpts.add(opt);<a name="line.201"></a>
+<span class="sourceLineNo">202</span>    }<a name="line.202"></a>
+<span class="sourceLineNo">203</span>    return c;<a name="line.203"></a>
+<span class="sourceLineNo">204</span>  }<a name="line.204"></a>
+<span class="sourceLineNo">205</span><a name="line.205"></a>
+<span class="sourceLineNo">206</span><a name="line.206"></a>
+<span class="sourceLineNo">207</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindImplementation(Class&lt;T&gt; iface,<a name="line.207"></a>
+<span class="sourceLineNo">208</span>                                                                 Class&lt;? extends T&gt; impl) {<a name="line.208"></a>
+<span class="sourceLineNo">209</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.209"></a>
+<span class="sourceLineNo">210</span>    try {<a name="line.210"></a>
+<span class="sourceLineNo">211</span>      c.b.bindImplementation(iface, impl);<a name="line.211"></a>
+<span class="sourceLineNo">212</span>    } catch (BindException e) {<a name="line.212"></a>
+<span class="sourceLineNo">213</span>      throw new ClassHierarchyException(e);<a name="line.213"></a>
+<span class="sourceLineNo">214</span>    }<a name="line.214"></a>
+<span class="sourceLineNo">215</span>    return c;<a name="line.215"></a>
+<span class="sourceLineNo">216</span>  }<a name="line.216"></a>
+<span class="sourceLineNo">217</span><a name="line.217"></a>
+<span class="sourceLineNo">218</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindImplementation(Class&lt;T&gt; iface,<a name="line.218"></a>
+<span class="sourceLineNo">219</span>                                                                 String impl) {<a name="line.219"></a>
+<span class="sourceLineNo">220</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.220"></a>
+<span class="sourceLineNo">221</span>    c.lateBindClazz.put(iface, impl);<a name="line.221"></a>
+<span class="sourceLineNo">222</span>    return c;<a name="line.222"></a>
+<span class="sourceLineNo">223</span>  }<a name="line.223"></a>
+<span class="sourceLineNo">224</span><a name="line.224"></a>
+<span class="sourceLineNo">225</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindImplementation(Class&lt;T&gt; iface,<a name="line.225"></a>
+<span class="sourceLineNo">226</span>                                                                 Impl&lt;? extends T&gt; opt) {<a name="line.226"></a>
+<span class="sourceLineNo">227</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.227"></a>
+<span class="sourceLineNo">228</span>    c.processUse(opt);<a name="line.228"></a>
+<span class="sourceLineNo">229</span>    c.freeImpls.put(iface, opt);<a name="line.229"></a>
+<span class="sourceLineNo">230</span>    return c;<a name="line.230"></a>
+<span class="sourceLineNo">231</span>  }<a name="line.231"></a>
+<span class="sourceLineNo">232</span><a name="line.232"></a>
+<span class="sourceLineNo">233</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindNamedParameter(<a name="line.233"></a>
+<span class="sourceLineNo">234</span>      Class&lt;? extends Name&lt;T&gt;&gt; name, String value) {<a name="line.234"></a>
+<span class="sourceLineNo">235</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.235"></a>
+<span class="sourceLineNo">236</span>    try {<a name="line.236"></a>
+<span class="sourceLineNo">237</span>      c.b.bindNamedParameter(name, value);<a name="line.237"></a>
+<span class="sourceLineNo">238</span>    } catch (BindException e) {<a name="line.238"></a>
+<span class="sourceLineNo">239</span>      throw new ClassHierarchyException(e);<a name="line.239"></a>
+<span class="sourceLineNo">240</span>    }<a name="line.240"></a>
+<span class="sourceLineNo">241</span>    return c;<a name="line.241"></a>
+<span class="sourceLineNo">242</span>  }<a name="line.242"></a>
+<span class="sourceLineNo">243</span><a name="line.243"></a>
+<span class="sourceLineNo">244</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindNamedParameter(<a name="line.244"></a>
+<span class="sourceLineNo">245</span>      Class&lt;? extends Name&lt;T&gt;&gt; name, Param&lt;T&gt; opt) {<a name="line.245"></a>
+<span class="sourceLineNo">246</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.246"></a>
+<span class="sourceLineNo">247</span>    c.processUse(opt);<a name="line.247"></a>
+<span class="sourceLineNo">248</span>    c.freeParams.put(name, opt);<a name="line.248"></a>
+<span class="sourceLineNo">249</span>    return c;<a name="line.249"></a>
+<span class="sourceLineNo">250</span>  }<a name="line.250"></a>
+<span class="sourceLineNo">251</span><a name="line.251"></a>
+<span class="sourceLineNo">252</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindNamedParameter(<a name="line.252"></a>
+<span class="sourceLineNo">253</span>      Class&lt;? extends Name&lt;T&gt;&gt; iface, Class&lt;? extends T&gt; impl) {<a name="line.253"></a>
+<span class="sourceLineNo">254</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.254"></a>
+<span class="sourceLineNo">255</span>    try {<a name="line.255"></a>
+<span class="sourceLineNo">256</span>      c.b.bindNamedParameter(iface, impl);<a name="line.256"></a>
+<span class="sourceLineNo">257</span>    } catch (BindException e) {<a name="line.257"></a>
+<span class="sourceLineNo">258</span>      throw new ClassHierarchyException(e);<a name="line.258"></a>
+<span class="sourceLineNo">259</span>    }<a name="line.259"></a>
+<span class="sourceLineNo">260</span>    return c;<a name="line.260"></a>
+<span class="sourceLineNo">261</span>  }<a name="line.261"></a>
+<span class="sourceLineNo">262</span><a name="line.262"></a>
+<span class="sourceLineNo">263</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindNamedParameter(<a name="line.263"></a>
+<span class="sourceLineNo">264</span>      Class&lt;? extends Name&lt;T&gt;&gt; iface, Impl&lt;? extends T&gt; opt) {<a name="line.264"></a>
+<span class="sourceLineNo">265</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.265"></a>
+<span class="sourceLineNo">266</span>    c.processUse(opt);<a name="line.266"></a>
+<span class="sourceLineNo">267</span>    c.freeImpls.put(iface, opt);<a name="line.267"></a>
+<span class="sourceLineNo">268</span>    return c;<a name="line.268"></a>
+<span class="sourceLineNo">269</span>  }<a name="line.269"></a>
+<span class="sourceLineNo">270</span><a name="line.270"></a>
+<span class="sourceLineNo">271</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindConstructor(Class&lt;T&gt; clazz,<a name="line.271"></a>
+<span class="sourceLineNo">272</span>                                                              Class&lt;? extends ExternalConstructor&lt;? extends T&gt;&gt; constructor) {<a name="line.272"></a>
+<span class="sourceLineNo">273</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.273"></a>
+<span class="sourceLineNo">274</span>    try {<a name="line.274"></a>
+<span class="sourceLineNo">275</span>      c.b.bindConstructor(clazz, constructor);<a name="line.275"></a>
+<span class="sourceLineNo">276</span>    } catch (BindException e) {<a name="line.276"></a>
+<span class="sourceLineNo">277</span>      throw new ClassHierarchyException(e);<a name="line.277"></a>
+<span class="sourceLineNo">278</span>    }<a name="line.278"></a>
+<span class="sourceLineNo">279</span>    return c;<a name="line.279"></a>
+<span class="sourceLineNo">280</span>  }<a name="line.280"></a>
+<span class="sourceLineNo">281</span><a name="line.281"></a>
+<span class="sourceLineNo">282</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindConstructor(Class&lt;T&gt; cons,<a name="line.282"></a>
+<span class="sourceLineNo">283</span>                                                              Impl&lt;? extends ExternalConstructor&lt;? extends T&gt;&gt; v) {<a name="line.283"></a>
+<span class="sourceLineNo">284</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.284"></a>
+<span class="sourceLineNo">285</span>    c.processUse(v);<a name="line.285"></a>
+<span class="sourceLineNo">286</span>    c.freeImpls.put(cons, v);<a name="line.286"></a>
+<span class="sourceLineNo">287</span>    return c;<a name="line.287"></a>
+<span class="sourceLineNo">288</span>  }<a name="line.288"></a>
+<span class="sourceLineNo">289</span><a name="line.289"></a>
+<span class="sourceLineNo">290</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindList(Class&lt;? extends Name&lt;List&lt;T&gt;&gt;&gt; iface,<a name="line.290"></a>
+<span class="sourceLineNo">291</span>                                                       Impl&lt;List&gt; opt) {<a name="line.291"></a>
+<span class="sourceLineNo">292</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.292"></a>
+<span class="sourceLineNo">293</span>    c.processUse(opt);<a name="line.293"></a>
+<span class="sourceLineNo">294</span>    c.freeImpls.put(iface, opt);<a name="line.294"></a>
+<span class="sourceLineNo">295</span>    return c;<a name="line.295"></a>
+<span class="sourceLineNo">296</span>  }<a name="line.296"></a>
+<span class="sourceLineNo">297</span><a name="line.297"></a>
+<span class="sourceLineNo">298</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindList(Class&lt;? extends Name&lt;List&lt;T&gt;&gt;&gt; iface,<a name="line.298"></a>
+<span class="sourceLineNo">299</span>                                                       Param&lt;List&gt; opt) {<a name="line.299"></a>
+<span class="sourceLineNo">300</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.300"></a>
+<span class="sourceLineNo">301</span>    c.processUse(opt);<a name="line.301"></a>
+<span class="sourceLineNo">302</span>    c.freeParams.put(iface, opt);<a name="line.302"></a>
+<span class="sourceLineNo">303</span>    return c;<a name="line.303"></a>
+<span class="sourceLineNo">304</span>  }<a name="line.304"></a>
+<span class="sourceLineNo">305</span><a name="line.305"></a>
+<span class="sourceLineNo">306</span>  public final &lt;T&gt; ConfigurationModuleBuilder bindList(Class&lt;? extends Name&lt;List&lt;T&gt;&gt;&gt; iface, List list) {<a name="line.306"></a>
+<span class="sourceLineNo">307</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.307"></a>
+<span class="sourceLineNo">308</span>    c.b.bindList(iface, list);<a name="line.308"></a>
+<span class="sourceLineNo">309</span>    return c;<a name="line.309"></a>
+<span class="sourceLineNo">310</span>  }<a name="line.310"></a>
+<span class="sourceLineNo">311</span><a name="line.311"></a>
+<span class="sourceLineNo">312</span>  private final &lt;T&gt; void processUse(Object impl) {<a name="line.312"></a>
+<span class="sourceLineNo">313</span>    Field f = map.get(impl);<a name="line.313"></a>
+<span class="sourceLineNo">314</span>    if (f == null) { /* throw */<a name="line.314"></a>
+<span class="sourceLineNo">315</span>      throw new ClassHierarchyException("Unknown Impl/Param when binding " + ReflectionUtilities.getSimpleName(impl.getClass()) + ".  Did you pass in a field from some other module?");<a name="line.315"></a>
+<span class="sourceLineNo">316</span>    }<a name="line.316"></a>
+<span class="sourceLineNo">317</span>    if (!reqUsed.contains(f)) {<a name="line.317"></a>
+<span class="sourceLineNo">318</span>      reqUsed.add(f);<a name="line.318"></a>
+<span class="sourceLineNo">319</span>    }<a name="line.319"></a>
+<span class="sourceLineNo">320</span>    if (!optUsed.contains(f)) {<a name="line.320"></a>
+<span class="sourceLineNo">321</span>      optUsed.add(f);<a name="line.321"></a>
+<span class="sourceLineNo">322</span>    }<a name="line.322"></a>
+<span class="sourceLineNo">323</span>  }<a name="line.323"></a>
+<span class="sourceLineNo">324</span><a name="line.324"></a>
+<span class="sourceLineNo">325</span>  public final ConfigurationModule build() throws ClassHierarchyException {<a name="line.325"></a>
+<span class="sourceLineNo">326</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.326"></a>
+<span class="sourceLineNo">327</span><a name="line.327"></a>
+<span class="sourceLineNo">328</span>    if (!(c.reqUsed.containsAll(c.reqDecl) &amp;&amp; c.optUsed.containsAll(c.optDecl))) {<a name="line.328"></a>
+<span class="sourceLineNo">329</span>      Set&lt;Field&gt; fset = new MonotonicHashSet&lt;&gt;();<a name="line.329"></a>
+<span class="sourceLineNo">330</span>      for (Field f : c.reqDecl) {<a name="line.330"></a>
+<span class="sourceLineNo">331</span>        if (!c.reqUsed.contains(f)) {<a name="line.331"></a>
+<span class="sourceLineNo">332</span>          fset.add(f);<a name="line.332"></a>
+<span class="sourceLineNo">333</span>        }<a name="line.333"></a>
+<span class="sourceLineNo">334</span>      }<a name="line.334"></a>
+<span class="sourceLineNo">335</span>      for (Field f : c.optDecl) {<a name="line.335"></a>
+<span class="sourceLineNo">336</span>        if (!c.optUsed.contains(f)) {<a name="line.336"></a>
+<span class="sourceLineNo">337</span>          fset.add(f);<a name="line.337"></a>
+<span class="sourceLineNo">338</span>        }<a name="line.338"></a>
+<span class="sourceLineNo">339</span>      }<a name="line.339"></a>
+<span class="sourceLineNo">340</span>      throw new ClassHierarchyException(<a name="line.340"></a>
+<span class="sourceLineNo">341</span>          "Found declared options that were not used in binds: "<a name="line.341"></a>
+<span class="sourceLineNo">342</span>              + toString(fset));<a name="line.342"></a>
+<span class="sourceLineNo">343</span>    }<a name="line.343"></a>
+<span class="sourceLineNo">344</span>    for (Class&lt;?&gt; clz : c.lateBindClazz.keySet()) {<a name="line.344"></a>
+<span class="sourceLineNo">345</span>      try {<a name="line.345"></a>
+<span class="sourceLineNo">346</span>        c.b.bind(ReflectionUtilities.getFullName(clz), c.lateBindClazz.get(clz));<a name="line.346"></a>
+<span class="sourceLineNo">347</span>      } catch (NameResolutionException e) {<a name="line.347"></a>
+<span class="sourceLineNo">348</span>        throw new ClassHierarchyException("ConfigurationModule refers to unknown class: " + c.lateBindClazz.get(clz), e);<a name="line.348"></a>
+<span class="sourceLineNo">349</span>      } catch (BindException e) {<a name="line.349"></a>
+<span class="sourceLineNo">350</span>        throw new ClassHierarchyException("bind failed while initializing ConfigurationModuleBuilder", e);<a name="line.350"></a>
+<span class="sourceLineNo">351</span>      }<a name="line.351"></a>
+<span class="sourceLineNo">352</span>    }<a name="line.352"></a>
+<span class="sourceLineNo">353</span>    return new ConfigurationModule(c);<a name="line.353"></a>
+<span class="sourceLineNo">354</span>  }<a name="line.354"></a>
+<span class="sourceLineNo">355</span><a name="line.355"></a>
+<span class="sourceLineNo">356</span>/*  public final &lt;T&gt; ConfigurationModuleBuilder bind(Class&lt;T&gt; iface, Class&lt;?&gt; impl) {<a name="line.356"></a>
+<span class="sourceLineNo">357</span>    ConfigurationModuleBuilder c = deepCopy();<a name="line.357"></a>
+<span class="sourceLineNo">358</span>    try {<a name="line.358"></a>
+<span class="sourceLineNo">359</span>      c.b.bind(iface, impl);<a name="line.359"></a>
+<span class="sourceLineNo">360</span>    } catch (BindException e) {<a name="line.360"></a>
+<span class="sourceLineNo">361</span>      throw new ClassHierarchyException(e);<a name="line.361"></a>
+<span class="sourceLineNo">362</span>    }<a name="line.362"></a>
+<span class="sourceLineNo">363</span>    return c;<a name="line.363"></a>
+<span class="sourceLineNo">364</span>  } */<a name="line.364"></a>
+<span class="sourceLineNo">365</span><a name="line.365"></a>
+<span class="sourceLineNo">366</span>  final ConfigurationModuleBuilder deepCopy() {<a name="line.366"></a>
+<span class="sourceLineNo">367</span>    // ooh... this is a dirty trick --- we strip this's type off here,<a name="line.367"></a>
+<span class="sourceLineNo">368</span>    // fortunately, we've all ready looked at the root object's class's<a name="line.368"></a>
+<span class="sourceLineNo">369</span>    // fields, and we copy the information we extracted from them, so<a name="line.369"></a>
+<span class="sourceLineNo">370</span>    // everything works out OK w.r.t. field detection.<a name="line.370"></a>
+<span class="sourceLineNo">371</span>    return new ConfigurationModuleBuilder(this) {<a name="line.371"></a>
+<span class="sourceLineNo">372</span>    };<a name="line.372"></a>
+<span class="sourceLineNo">373</span>  }<a name="line.373"></a>
+<span class="sourceLineNo">374</span><a name="line.374"></a>
+<span class="sourceLineNo">375</span>  final String toString(Set&lt;Field&gt; s) {<a name="line.375"></a>
+<span class="sourceLineNo">376</span>    StringBuilder sb = new StringBuilder("{");<a name="line.376"></a>
+<span class="sourceLineNo">377</span>    boolean first = true;<a name="line.377"></a>
+<span class="sourceLineNo">378</span>    for (Field f : s) {<a name="line.378"></a>
+<span class="sourceLineNo">379</span>      sb.append((first ? " " : ", ") + f.getName());<a name="line.379"></a>
+<span class="sourceLineNo">380</span>      first = false;<a name="line.380"></a>
+<span class="sourceLineNo">381</span>    }<a name="line.381"></a>
+<span class="sourceLineNo">382</span>    sb.append(" }");<a name="line.382"></a>
+<span class="sourceLineNo">383</span>    return sb.toString();<a name="line.383"></a>
+<span class="sourceLineNo">384</span>  }<a name="line.384"></a>
+<span class="sourceLineNo">385</span>}<a name="line.385"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>
