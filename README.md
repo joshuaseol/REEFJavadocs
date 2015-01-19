@@ -7,4 +7,4 @@ Navigate to the REEF source code then use the command:
 
 	mvn javadoc:aggregate
 
-This will create a directory named "apidocs" which include all the necessary Javadocs for REEF.
+This will create a directory named "apidocs" under `{$REEF_HOME}\target\site\` which includes all the necessary Javadocs for REEF.
